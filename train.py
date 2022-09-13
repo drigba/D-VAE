@@ -4,6 +4,8 @@ import sys
 import math
 import pickle
 import pdb
+import networkx.utils as utils
+
 import argparse
 import random
 from tqdm import tqdm
@@ -14,7 +16,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import numpy as np
 import scipy.io
 from scipy.linalg import qr 
-import igraph
+import igraph as ig
 from random import shuffle
 import matplotlib
 matplotlib.use('agg')
@@ -34,7 +36,7 @@ parser.add_argument('--nvt', type=int, default=6, help='number of different node
                     6 for final_structures6, 8 for asia_200k')
 parser.add_argument('--save-appendix', default='', 
                     help='what to append to data-name as save-name for results')
-parser.add_argument('--save-interval', type=int, default=100, metavar='N',
+parser.add_argument('--save-interval', type=int, default=10, metavar='N',
                     help='how many epochs to wait each time to save model states')
 parser.add_argument('--sample-number', type=int, default=20, metavar='N',
                     help='how many samples to generate each time')
@@ -67,7 +69,7 @@ parser.add_argument('--predictor', action='store_true', default=False,
 # optimization settings
 parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
                     help='learning rate (default: 1e-4)')
-parser.add_argument('--epochs', type=int, default=100000, metavar='N',
+parser.add_argument('--epochs', type=int, default=200, metavar='N',
                     help='number of epochs to train')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N',
                     help='batch size during training')
@@ -95,32 +97,8 @@ print(args)
 
 '''Prepare data'''
 args.file_dir = os.path.dirname(os.path.realpath('__file__'))
-args.res_dir = os.path.join(args.file_dir, 'results/{}{}'.format(args.data_name, 
+args.res_dir = os.path.join(args.file_dir, 'vertex_4_modified_model/{}{}'.format(args.data_name, 
                                                                  args.save_appendix))
-if not os.path.exists(args.res_dir):
-    os.makedirs(args.res_dir) 
-
-pkl_name = os.path.join(args.res_dir, args.data_name + '.pkl')
-
-# check whether to load pre-stored pickle data
-if os.path.isfile(pkl_name) and not args.reprocess:
-    with open(pkl_name, 'rb') as f:
-        train_data, test_data, graph_args = pickle.load(f)
-# otherwise process the raw data and save to .pkl
-else:
-    # determine data formats according to models, DVAE: igraph, SVAE: string (as tensors)
-    if args.model.startswith('DVAE'):
-        input_fmt = 'igraph'
-    elif args.model.startswith('SVAE'):
-        input_fmt = 'string'
-    if args.data_type == 'ENAS':
-        train_data, test_data, graph_args = load_ENAS_graphs(args.data_name, n_types=args.nvt,
-                                                             fmt=input_fmt)
-    elif args.data_type == 'BN':
-        train_data, test_data, graph_args = load_BN_graphs(args.data_name, n_types=args.nvt,
-                                                           fmt=input_fmt)
-    with open(pkl_name, 'wb') as f:
-        pickle.dump((train_data, test_data, graph_args), f)
 
 # delete old files in the result directory
 remove_list = [f for f in os.listdir(args.res_dir) if not f.endswith(".pkl") and 
@@ -153,6 +131,24 @@ if args.small_train:
 
 '''Prepare the model'''
 # model
+
+# max_n = 5
+# num_vertex_type = 1 or 5 + start and end so 3 or 7
+# START_TYPE = 0
+# END_TYPE = 1
+# model = DVAE
+# hs = 501 the default value  -hidden size of GRU
+# nz = 56 the default latent space dimension
+# bidirectional = False by default
+# args.predictor = False
+# args.continue_from = None
+graph_args.max_n = 6
+graph_args.num_vertex_type = 6
+graph_args.START_TYPE = 4
+graph_args.END_TYPE = 5
+
+
+
 model = eval(args.model)(
         graph_args.max_n, 
         graph_args.num_vertex_type, 
@@ -192,17 +188,7 @@ else:
                                                   'scheduler_checkpoint{}.pth'.format(epoch)))
 
 # plot sample train/test graphs
-if not os.path.exists(os.path.join(args.res_dir, 'train_graph_id0.pdf')) or args.reprocess:
-    if not args.keep_old:
-        for data in ['train_data', 'test_data']:
-            G = [g for g, y in eval(data)[:10]]
-            if args.model.startswith('SVAE'):
-                G = [g.to(device) for g in G]
-                G = model._collate_fn(G)
-                G = model.construct_igraph(G[:, :, :model.nvt], G[:, :, model.nvt:], False)
-            for i, g in enumerate(G):
-                name = '{}_graph_id{}'.format(data[:-5], i)
-                plot_DAG(g, args.res_dir, name, data_type=args.data_type)
+
 
 
 '''Define some train/test functions'''
@@ -214,13 +200,10 @@ def train(epoch):
     pred_loss = 0
     shuffle(train_data)
     pbar = tqdm(train_data)
+
     g_batch = []
-    y_batch = []
-    for i, (g, y) in enumerate(pbar):
-        if args.model.startswith('SVAE'):  # for SVAE, g is tensor
-            g = g.to(device)
+    for i, g in enumerate(pbar):
         g_batch.append(g)
-        y_batch.append(y)
         if len(g_batch) == args.batch_size or i == len(train_data) - 1:
             optimizer.zero_grad()
             g_batch = model._collate_fn(g_batch)
@@ -231,32 +214,20 @@ def train(epoch):
             else:
                 mu, logvar = model.encode(g_batch)
                 loss, recon, kld = model.loss(mu, logvar, g_batch)
-                if args.predictor:
-                    y_batch = torch.FloatTensor(y_batch).unsqueeze(1).to(device)
-                    y_pred = model.predictor(mu)
-                    pred = model.mseloss(y_pred, y_batch)
-                    loss += pred
-                    pbar.set_description('Epoch: %d, loss: %0.4f, recon: %0.4f, kld: %0.4f, pred: %0.4f'\
-                            % (epoch, loss.item()/len(g_batch), recon.item()/len(g_batch), 
-                            kld.item()/len(g_batch), pred/len(g_batch)))
-                else:
-                    pbar.set_description('Epoch: %d, loss: %0.4f, recon: %0.4f, kld: %0.4f' % (
-                                     epoch, loss.item()/len(g_batch), recon.item()/len(g_batch), 
-                                     kld.item()/len(g_batch)))
+                
+                pbar.set_description('Epoch: %d, loss: %0.4f, recon: %0.4f, kld: %0.4f' % (
+                                    epoch, loss.item()/len(g_batch), recon.item()/len(g_batch), 
+                                    kld.item()/len(g_batch)))
             loss.backward()
             
             train_loss += float(loss)
             recon_loss += float(recon)
             kld_loss += float(kld)
-            if args.predictor:
-                pred_loss += float(pred)
             optimizer.step()
             g_batch = []
-            y_batch = []
-
+        
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss / len(train_data)))
-
     if args.predictor:
         return train_loss, recon_loss, kld_loss, pred_loss
     return train_loss, recon_loss, kld_loss
@@ -291,11 +262,10 @@ def test():
     pbar = tqdm(test_data)
     g_batch = []
     y_batch = []
-    for i, (g, y) in enumerate(pbar):
+    for i, g in enumerate(pbar):
         if args.model.startswith('SVAE'):
             g = g.to(device)
         g_batch.append(g)
-        y_batch.append(y)
         if len(g_batch) == args.infer_batch_size or i == len(test_data) - 1:
             g = model._collate_fn(g_batch)
             mu, logvar = model.encode(g)
@@ -341,7 +311,7 @@ def prior_validity(scale_to_train_range=False):
     print('Prior validity experiment begins...')
     G = []
     G_valid = []
-    G_train = [g for g, y in train_data]
+    G_train = [g for g in train_data]
     if args.model.startswith('SVAE'):
         G_train = [g.to(device) for g in G_train]
         G_train = model._collate_fn(G_train)
@@ -355,18 +325,15 @@ def prior_validity(scale_to_train_range=False):
             if scale_to_train_range:
                 z = z * z_std + z_mean  # move to train's latent range
             for j in range(decode_times):
+                print("z: " + str(len(z)))
                 g_batch = model.decode(z)
+                print("g batch: " + str(len(g_batch)))
                 G.extend(g_batch)
-                if args.data_type == 'ENAS':
-                    for g in g_batch:
-                        if is_valid_ENAS(g, graph_args.START_TYPE, graph_args.END_TYPE):
-                            n_valid += 1
-                            G_valid.append(g)
-                elif args.data_type == 'BN':
-                    for g in g_batch:
-                        if is_valid_BN(g, graph_args.START_TYPE, graph_args.END_TYPE):
-                            n_valid += 1
-                            G_valid.append(g)
+                for g in g_batch:
+                    if is_valid_ENAS(g, graph_args.START_TYPE, graph_args.END_TYPE):
+                        n_valid += 1
+                        G_valid.append(g)
+
             cnt = 0
     r_valid = n_valid / (n_latent_points * decode_times)
     print('Ratio of valid decodings from the prior: {:.4f}'.format(r_valid))
@@ -374,7 +341,8 @@ def prior_validity(scale_to_train_range=False):
     G_valid_str = [decode_igraph_to_ENAS(g) for g in G_valid]
     r_unique = len(set(G_valid_str)) / len(G_valid_str) if len(G_valid_str)!=0 else 0.0
     print('Ratio of unique decodings from the prior: {:.4f}'.format(r_unique))
-
+    print(len(G_train))
+    print(len(G_valid))
     r_novel = 1 - ratio_same_DAG(G_train, G_valid)
     print('Ratio of novel graphs out of training data: {:.4f}'.format(r_novel))
     return r_valid, r_unique, r_novel
@@ -385,7 +353,7 @@ def extract_latent(data):
     Z = []
     Y = []
     g_batch = []
-    for i, (g, y) in enumerate(tqdm(data)):
+    for i, g in enumerate(tqdm(data)):
         if args.model.startswith('SVAE'):
             g_ = g.to(device)
         elif args.model.startswith('DVAE'):
@@ -399,7 +367,6 @@ def extract_latent(data):
             mu = mu.cpu().detach().numpy()
             Z.append(mu)
             g_batch = []
-        Y.append(y)
     return np.concatenate(Z, 0), np.array(Y)
 
 
@@ -422,249 +389,61 @@ def save_latent_representations(epoch):
                          'Y_test': Y_test
                          }
                      )
-
-
-def interpolation_exp(epoch, num=5):
-    print('Interpolation experiments between two random testing graphs')
-    interpolation_res_dir = os.path.join(args.res_dir, 'interpolation')
-    if not os.path.exists(interpolation_res_dir):
-        os.makedirs(interpolation_res_dir) 
-    if args.data_type == 'BN':
-        eva = Eval_BN(interpolation_res_dir)
-    interpolate_number = 10
-    model.eval()
-    cnt = 0
-    for i in range(0, len(test_data), 2):
-        cnt += 1
-        (g0, _), (g1, _) = test_data[i], test_data[i+1]
-        if args.model.startswith('SVAE'):
-            g0 = g0.to(device)
-            g1 = g1.to(device)
-            g0 = model._collate_fn([g0])
-            g1 = model._collate_fn([g1])
-        z0, _ = model.encode(g0)
-        z1, _ = model.encode(g1)
-        print('norm of z0: {}, norm of z1: {}'.format(torch.norm(z0), torch.norm(z1)))
-        print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
-        Z = []  # to store all the interpolation points
-        for j in range(0, interpolate_number + 1):
-            zj = z0 + (z1 - z0) / interpolate_number * j
-            Z.append(zj)
-        Z = torch.cat(Z, 0)
-        # decode many times and select the most common one
-        G, G_str = decode_from_latent_space(Z, model, return_igraph=True,
-                                            data_type=args.data_type) 
-        names = []
-        scores = []
-        for j in range(0, interpolate_number + 1):
-            namej = 'graph_interpolate_{}_{}_of_{}'.format(i, j, interpolate_number)
-            namej = plot_DAG(G[j], interpolation_res_dir, namej, backbone=True, 
-                             data_type=args.data_type)
-            names.append(namej)
-            if args.data_type == 'BN':
-                scorej = eva.eval(G_str[j])
-                scores.append(scorej)
-        fig = plt.figure(figsize=(120, 20))
-        for j, namej in enumerate(names):
-            imgj = mpimg.imread(namej)
-            fig.add_subplot(1, interpolate_number + 1, j + 1)
-            plt.imshow(imgj)
-            if args.data_type == 'BN':
-                plt.title('{}'.format(scores[j]), fontsize=40)
-            plt.axis('off')
-        plt.savefig(os.path.join(args.res_dir, 
-                    args.data_name + '_{}_interpolate_exp_ensemble_epoch{}_{}.pdf'.format(
-                    args.model, epoch, i)), bbox_inches='tight')
-        '''
-        # draw figures with the same height
-        new_name = os.path.join(args.res_dir, args.data_name + 
-                                '_{}_interpolate_exp_ensemble_{}.pdf'.format(args.model, i))
-        combine_figs_horizontally(names, new_name)
-        '''
-        if cnt == num:
-            break
-
-
-def interpolation_exp2(epoch):
-    if args.data_type != 'ENAS':
-        return
-    print('Interpolation experiments between flat-net and dense-net')
-    interpolation_res_dir = os.path.join(args.res_dir, 'interpolation2')
-    if not os.path.exists(interpolation_res_dir):
-        os.makedirs(interpolation_res_dir) 
-    interpolate_number = 10
-    model.eval()
-    n = graph_args.max_n
-    g0 = [[1]+[0]*(i-1) for i in range(1, n-1)]  # this is flat-net
-    g1 = [[1]+[1]*(i-1) for i in range(1, n-1)]  # this is dense-net
-
-    if args.model.startswith('SVAE'):
-        g0, _ = decode_ENAS_to_tensor(str(g0), n_types=6)
-        g1, _ = decode_ENAS_to_tensor(str(g1), n_types=6)
-        g0 = g0.to(device)
-        g1 = g1.to(device)
-        g0 = model._collate_fn([g0])
-        g1 = model._collate_fn([g1])
-    elif args.model.startswith('DVAE'):
-        g0, _ = decode_ENAS_to_igraph(str(g0))
-        g1, _ = decode_ENAS_to_igraph(str(g1))
-    z0, _ = model.encode(g0)
-    z1, _ = model.encode(g1)
-    print('norm of z0: {}, norm of z1: {}'.format(torch.norm(z0), torch.norm(z1)))
-    print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
-    Z = []  # to store all the interpolation points
-    for j in range(0, interpolate_number + 1):
-        zj = z0 + (z1 - z0) / interpolate_number * j
-        Z.append(zj)
-    Z = torch.cat(Z, 0)
-    # decode many times and select the most common one
-    G, _ = decode_from_latent_space(Z, model, return_igraph=True, data_type=args.data_type)  
-    names = []
-    for j in range(0, interpolate_number + 1):
-        namej = 'graph_interpolate_{}_of_{}'.format(j, interpolate_number)
-        namej = plot_DAG(G[j], interpolation_res_dir, namej, backbone=True, 
-                         data_type=args.data_type)
-        names.append(namej)
-    fig = plt.figure(figsize=(120, 20))
-    for j, namej in enumerate(names):
-        imgj = mpimg.imread(namej)
-        fig.add_subplot(1, interpolate_number + 1, j + 1)
-        plt.imshow(imgj)
-        plt.axis('off')
-    plt.savefig(os.path.join(args.res_dir, 
-                args.data_name + '_{}_interpolate_exp2_ensemble_epoch{}.pdf'.format(
-                args.model, epoch)), bbox_inches='tight')
-
-
-def interpolation_exp3(epoch):
-    if args.data_type != 'ENAS':
-        return
-    print('Interpolation experiments around a great circle')
-    interpolation_res_dir = os.path.join(args.res_dir, 'interpolation3')
-    if not os.path.exists(interpolation_res_dir):
-        os.makedirs(interpolation_res_dir) 
-    interpolate_number = 36
-    model.eval()
-    n = graph_args.max_n
-    g0 = [[1]+[0]*(i-1) for i in range(1, n-1)]  # this is flat-net
-    if args.model.startswith('SVAE'):
-        g0, _ = decode_ENAS_to_tensor(str(g0), n_types=6)
-        g0 = g0.to(device)
-        g0 = model._collate_fn([g0])
-    elif args.model.startswith('DVAE'):
-        g0, _ = decode_ENAS_to_igraph(str(g0))
-    z0, _ = model.encode(g0)
-    norm0 = torch.norm(z0)
-    z1 = torch.ones_like(z0)
-    # there are infinite possible directions that are orthogonal to z0,
-    # we just randomly pick one from a finite set
-    dim_to_change = random.randint(0, z0.shape[1]-1)  # this to get different great circles
-    print(dim_to_change)
-    z1[0, dim_to_change] = -(z0[0, :].sum() - z0[0, dim_to_change]) / z0[0, dim_to_change]
-    z1 = z1 / torch.norm(z1) * norm0
-    print('z0: ', z0, 'z1: ', z1, 'dot product: ', (z0 * z1).sum().item())
-    print('norm of z0: {}, norm of z1: {}'.format(norm0, torch.norm(z1)))
-    print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
-    omega = torch.acos(torch.dot(z0.flatten(), z1.flatten()))
-    print('angle between z0 and z1: {}'.format(omega))
-    Z = []  # to store all the interpolation points
-    for j in range(0, interpolate_number + 1):
-        theta = 2*math.pi / interpolate_number * j
-        zj = z0 * np.cos(theta) + z1 * np.sin(theta)
-        Z.append(zj)
-    Z = torch.cat(Z, 0)
-    # decode many times and select the most common one
-    G, _ = decode_from_latent_space(Z, model, return_igraph=True, data_type=args.data_type) 
-    names = []
-    for j in range(0, interpolate_number + 1):
-        namej = 'graph_interpolate_{}_of_{}'.format(j, interpolate_number)
-        namej = plot_DAG(G[j], interpolation_res_dir, namej, backbone=True, 
-                         data_type=args.data_type)
-        names.append(namej)
-    # draw figures with the same height
-    new_name = os.path.join(args.res_dir, args.data_name + 
-                            '_{}_interpolate_exp3_ensemble_epoch{}.pdf'.format(args.model, epoch))
-    combine_figs_horizontally(names, new_name)
-
-
-def smoothness_exp(epoch, gap=0.05):
-    print('Smoothness experiments around a latent vector')
-    smoothness_res_dir = os.path.join(args.res_dir, 'smoothness')
-    if not os.path.exists(smoothness_res_dir):
-        os.makedirs(smoothness_res_dir) 
-    
-    #z0 = torch.zeros(1, model.nz).to(device)  # use all-zero vector as center
-    
-    if args.data_type == 'ENAS': 
-        g_str = '4 4 0 3 0 0 5 0 0 1 2 0 0 0 0 5 0 0 0 1 0'  # a 6-layer network
-        row = [int(x) for x in g_str.split()]
-        row = flat_ENAS_to_nested(row, model.max_n-2)
-        if args.model.startswith('SVAE'):
-            g0, _ = decode_ENAS_to_tensor(row, n_types=model.max_n-2)
-            g0 = g0.to(device)
-            g0 = model._collate_fn([g0])
-        elif args.model.startswith('DVAE'):
-            g0, _ = decode_ENAS_to_igraph(row)
-    elif args.data_type == 'BN':
-        g0 = train_data[20][0]
-        if args.model.startswith('SVAE'):
-            g0 = g0.to(device)
-            g0 = model._collate_fn([g0])
-    z0, _ = model.encode(g0)
-
-    # select two orthogonal directions in latent space
-    tmp = np.random.randn(z0.shape[1], z0.shape[1])
-    Q, R = qr(tmp)
-    dir1 = torch.FloatTensor(tmp[0:1, :]).to(device)
-    dir2 = torch.FloatTensor(tmp[1:2, :]).to(device)
-
-    # generate architectures along two orthogonal directions
-    grid_size = 13
-    grid_size = 9
-    mid = grid_size // 2
-    Z = []
-    pbar = tqdm(range(grid_size ** 2))
-    for idx in pbar:
-        i, j = divmod(idx, grid_size)
-        zij = z0 + dir1 * (i - mid) * gap + dir2 * (j - mid) * gap
-        Z.append(zij)
-    Z = torch.cat(Z, 0)
-    if True:
-        G, _ = decode_from_latent_space(Z, model, return_igraph=True, data_type=args.data_type)
-    else:  # decode by 3 batches in case of GPU out of memory 
-        Z0, Z1, Z2 = Z[:len(Z)//3, :], Z[len(Z)//3:len(Z)//3*2, :], Z[len(Z)//3*2:, :]
-        G = []
-        G += decode_from_latent_space(Z0, model, return_igraph=True, data_type=args.data_type)[0]
-        G += decode_from_latent_space(Z1, model, return_igraph=True, data_type=args.data_type)[0]
-        G += decode_from_latent_space(Z2, model, return_igraph=True, data_type=args.data_type)[0]
-    names = []
-    for idx in pbar:
-        i, j = divmod(idx, grid_size)
-        pbar.set_description('Drawing row {}/{}, col {}/{}...'.format(i+1, 
-                             grid_size, j+1, grid_size))
-        nameij = 'graph_smoothness{}_{}'.format(i, j)
-        nameij = plot_DAG(G[idx], smoothness_res_dir, nameij, data_type=args.data_type)
-        names.append(nameij)
-    #fig = plt.figure(figsize=(200, 200))
-    if args.data_type == 'ENAS':
-        fig = plt.figure(figsize=(50, 50))
-    elif args.data_type == 'BN':
-        fig = plt.figure(figsize=(30, 30))
-    
-    nrow, ncol = grid_size, grid_size
-    for ij, nameij in enumerate(names):
-        imgij = mpimg.imread(nameij)
-        fig.add_subplot(nrow, ncol, ij + 1)
-        plt.imshow(imgij)
-        plt.axis('off')
-    plt.rcParams["axes.edgecolor"] = "black"
-    plt.rcParams["axes.linewidth"] = 1
-    plt.savefig(os.path.join(args.res_dir, 
-                args.data_name + '_{}_smoothness_ensemble_epoch{}_gap={}_small.pdf'.format(
-                args.model, epoch, gap)), bbox_inches='tight')
-
-
 '''Training begins here'''
+random.seed = 10
+all_data = []
+train_data = []
+test_data = []
+H_name = 'H_forward'  # name of the hidden states attribute
+
+print("Loading train Data")
+# During training vertices has to be processed in topological order
+# Vertices are taken in order following their index
+# Meaning that vertex with index 0 will be processed first
+# Therefore the newly added starting node has to have index:0 otherwise an exception is thrown
+for filename in os.listdir("..\\graph_data\\vertex_4"):
+    path = os.path.join("..\\graph_data\\vertex_4", filename)
+    with open(path, 'rb') as pickle_file:
+        # Load file
+        graph = pickle.load(pickle_file)
+        edge_list = graph.get_edgelist()
+        # Create new graph
+        graph2 = ig.Graph(directed=True)
+        graph2.add_vertices(6)
+        # Copy vertices to new graph
+        for vs_i in range(len(graph.vs)):
+            graph2.vs[vs_i+1]['_nx_name'] =  graph.vs[vs_i]['_nx_name']
+            graph2.vs[vs_i+1]['type'] =  graph.vs[vs_i]['_nx_name']
+        # Copy edges to new graph
+        for edge_pair in edge_list:
+            p1 = edge_pair[0]
+            p2 = edge_pair[1]
+            graph2.add_edge(p1+1,p2+1)
+        # Set vertex attributes
+        graph2.vs[0]['_nx_name'] = 4
+        graph2.vs[0]['type'] = 4
+        graph2.vs[5]['_nx_name'] = 5
+        graph2.vs[5]['type'] = 5
+        graph2.add_edge(0,1)
+        graph2.add_edge(4,5)
+
+        all_data.append(graph2)
+
+        
+
+
+random.shuffle(all_data)
+num_of_data = len(all_data)
+num_of_train = math.floor(2*num_of_data/3)
+train_data = all_data
+test_data = all_data
+print(len(train_data))
+
+
+
+
+print("Train data loaded")
+
 min_loss = math.inf  # >= python 3.5
 min_loss_epoch = None
 loss_name = os.path.join(args.res_dir, 'train_loss.txt')
@@ -677,7 +456,6 @@ if args.only_test:
     epoch = args.continue_from
     #sampled = model.generate_sample(args.sample_number)
     #save_latent_representations(epoch)
-    visualize_recon(300)
     #interpolation_exp2(epoch)
     #interpolation_exp3(epoch)
     #prior_validity(True)
@@ -711,14 +489,14 @@ for epoch in range(start_epoch + 1, args.epochs + 1):
         torch.save(optimizer.state_dict(), optimizer_name)
         torch.save(scheduler.state_dict(), scheduler_name)
         print("visualize reconstruction examples...")
-        visualize_recon(epoch)
+        # visualize_recon(epoch)
         print("extract latent representations...")
         save_latent_representations(epoch)
         print("sample from prior...")
         sampled = model.generate_sample(args.sample_number)
         for i, g in enumerate(sampled):
             namei = 'graph_{}_sample{}'.format(epoch, i)
-            plot_DAG(g, args.res_dir, namei, data_type=args.data_type)
+            # plot_DAG(g, args.res_dir, namei, data_type=args.data_type)
         print("plot train loss...")
         losses = np.loadtxt(loss_name)
         if losses.ndim == 1:
@@ -733,21 +511,20 @@ for epoch in range(start_epoch + 1, args.epochs + 1):
         plt.ylabel('Train loss')
         plt.legend()
         plt.savefig(loss_plot_name)
-
-'''Testing begins here'''
-if args.predictor:
-    Nll, acc, pred_rmse = test()
-else:
-    Nll, acc = test()
-    pred_rmse = 0
-r_valid, r_unique, r_novel = prior_validity(True)
-with open(test_results_name, 'a') as result_file:
-    result_file.write("Epoch {} Test recon loss: {} recon acc: {:.4f} r_valid: {:.4f}".format(
-            epoch, Nll, acc, r_valid) + 
-            " r_unique: {:.4f} r_novel: {:.4f} pred_rmse: {:.4f}\n".format(
-            r_unique, r_novel, pred_rmse))
-interpolation_exp2(epoch)
-smoothness_exp(epoch)
-interpolation_exp3(epoch)
+        if epoch%40 == 0:
+            if args.predictor:
+                Nll, acc, pred_rmse = test()
+            else:
+                Nll, acc = test()
+                pred_rmse = 0
+            r_valid, r_unique, r_novel = prior_validity(True)
+            with open(test_results_name, 'a') as result_file:
+                result_file.write("Epoch {} Test recon loss: {} recon acc: {:.4f} r_valid: {:.4f}".format(
+                        epoch, Nll, acc, r_valid) + 
+                        " r_unique: {:.4f} r_novel: {:.4f} pred_rmse: {:.4f}\n".format(
+                            r_unique, r_novel, pred_rmse))
+# interpolation_exp2(epoch)
+# smoothness_exp(epoch)
+# interpolation_exp3(epoch)
 
 pdb.set_trace()

@@ -1,0 +1,9 @@
+*.png
+*.pkl
+*.mat
+*.pth
+*.txt
+*.pdf
+vertex_4*
+*.pyc
+results*

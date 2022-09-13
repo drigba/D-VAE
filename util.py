@@ -1,5 +1,6 @@
 from __future__ import print_function
 import gzip
+from math import inf
 import pickle
 import numpy as np
 import torch
@@ -483,6 +484,8 @@ def ratio_same_DAG(G0, G1):
             if is_same_DAG(g1, g0):
                 res += 1
                 break
+    if len(G1) == 0:
+        return inf
     return res / len(G1)
 
 
@@ -511,6 +514,10 @@ def is_valid_DAG(g, START_TYPE=0, END_TYPE=1):
 def is_valid_ENAS(g, START_TYPE=0, END_TYPE=1):
     # first need to be a valid DAG computation graph
     res = is_valid_DAG(g, START_TYPE, END_TYPE)
+    if not res:
+        print("g is not dag\n" + str(g))
+        for ko in g.vs:
+            print(ko)
     # in addition, node i must connect to node i+1
     for i in range(g.vcount()-2):
         res = res and g.are_connected(i, i+1)
