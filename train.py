@@ -1,5 +1,6 @@
 from __future__ import print_function
 import os
+from pickletools import optimize
 import sys
 import math
 import pickle
@@ -13,6 +14,7 @@ from shutil import copy
 import torch
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CyclicLR
 import numpy as np
 import scipy.io
 from scipy.linalg import qr 
@@ -23,13 +25,13 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from util import *
-from models import *
+from modelsRIGHT import *
 from bayesian_optimization.evaluate_BN import Eval_BN
-
+import networkx as nx
 
 parser = argparse.ArgumentParser(description='Train Variational Autoencoders for DAGs')
 # general settings
-parser.add_argument('--data-type', default='ENAS',
+parser.add_argument('--data-type', default='BN',
                     help='ENAS: ENAS-format CNN structures; BN: Bayesian networks')
 parser.add_argument('--data-name', default='final_structures6', help='graph dataset name')
 parser.add_argument('--nvt', type=int, default=6, help='number of different node types, \
@@ -51,15 +53,14 @@ parser.add_argument('--only-test', action='store_true', default=False,
 parser.add_argument('--small-train', action='store_true', default=False,
                     help='if True, use a smaller version of train set')
 # model settings
-parser.add_argument('--model', default='DVAE', help='model to use: DVAE, SVAE, \
-                    DVAE_fast, DVAE_BN, SVAE_oneshot, DVAE_GCN')
+parser.add_argument('--model', default='DVAE', help='model to use: DVAE, DVAE_NOBATCHNORM')
 parser.add_argument('--load-latest-model', action='store_true', default=False,
                     help='whether to load latest_model.pth')
 parser.add_argument('--continue-from', type=int, default=None, 
                     help="from which epoch's checkpoint to continue training")
-parser.add_argument('--hs', type=int, default=501, metavar='N',
+parser.add_argument('--hs', type=int, default=128, metavar='N',
                     help='hidden size of GRUs')
-parser.add_argument('--nz', type=int, default=56, metavar='N',
+parser.add_argument('--nz', type=int, default=4, metavar='N',
                     help='number of dimensions of latent vectors z')
 parser.add_argument('--bidirectional', action='store_true', default=False,
                     help='whether to use bidirectional encoding')
@@ -69,11 +70,11 @@ parser.add_argument('--predictor', action='store_true', default=False,
 # optimization settings
 parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
                     help='learning rate (default: 1e-4)')
-parser.add_argument('--epochs', type=int, default=200, metavar='N',
+parser.add_argument('--epochs', type=int, default=3000, metavar='N',
                     help='number of epochs to train')
-parser.add_argument('--batch-size', type=int, default=32, metavar='N',
+parser.add_argument('--batch-size', type=int, default=16, metavar='N',
                     help='batch size during training')
-parser.add_argument('--infer-batch-size', type=int, default=128, metavar='N',
+parser.add_argument('--infer-batch-size', type=int, default=512, metavar='N',
                     help='batch size during inference')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
@@ -81,10 +82,12 @@ parser.add_argument('--all-gpus', action='store_true', default=False,
                     help='use all available GPUs')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
+parser.add_argument('--beta', type=int, default=0.1, metavar='S',
+                    help='KL divergence weight in loss (default:0.01)')
+                
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
-torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
     device = torch.device("cuda:0")
@@ -97,8 +100,26 @@ print(args)
 
 '''Prepare data'''
 args.file_dir = os.path.dirname(os.path.realpath('__file__'))
-args.res_dir = os.path.join(args.file_dir, 'vertex_4_modified_model/{}{}'.format(args.data_name, 
+args.res_dir = os.path.join(args.file_dir, 'vertex_4_4dim_latent_KL0.1_batchnorm_momentum0.5/{}{}'.format(args.data_name, 
                                                                  args.save_appendix))
+args.scheduler_dir = os.path.join(args.res_dir, "scheduler")
+args.optimizer_dir = os.path.join(args.res_dir, "optimizer")
+args.model_dir = os.path.join(args.res_dir, "model")
+args.latent_dir = os.path.join(args.res_dir, "latent")
+args.fig_dir = os.path.join(args.res_dir, "figures")
+
+if not os.path.exists(args.res_dir):
+    os.makedirs(args.res_dir) 
+if not os.path.exists(args.scheduler_dir):
+    os.makedirs(args.scheduler_dir) 
+if not os.path.exists(args.optimizer_dir):
+    os.makedirs(args.optimizer_dir)
+if not os.path.exists(args.model_dir):
+    os.makedirs(args.model_dir) 
+if not os.path.exists(args.latent_dir):
+    os.makedirs(args.latent_dir) 
+if not os.path.exists(args.fig_dir):
+    os.makedirs(args.fig_dir) 
 
 # delete old files in the result directory
 remove_list = [f for f in os.listdir(args.res_dir) if not f.endswith(".pkl") and 
@@ -112,7 +133,7 @@ for f in remove_list:
 if not args.keep_old:
     # backup current .py files
     copy('train.py', args.res_dir)
-    copy('models.py', args.res_dir)
+    copy('modelsRIGHT.py', args.res_dir)
     copy('util.py', args.res_dir)
 
 # save command line input
@@ -121,16 +142,10 @@ with open(os.path.join(args.res_dir, 'cmd_input.txt'), 'a') as f:
     f.write(cmd_input)
 print('Command line input: ' + cmd_input + ' is saved.')
 
-# construct train data
-if args.no_test:
-    train_data = train_data + test_data
 
-if args.small_train:
-    train_data = train_data[:100]
 
 
 '''Prepare the model'''
-# model
 
 # max_n = 5
 # num_vertex_type = 1 or 5 + start and end so 3 or 7
@@ -144,8 +159,8 @@ if args.small_train:
 # args.continue_from = None
 graph_args.max_n = 6
 graph_args.num_vertex_type = 6
-graph_args.START_TYPE = 4
-graph_args.END_TYPE = 5
+graph_args.START_TYPE = 0
+graph_args.END_TYPE = 1
 
 
 
@@ -156,7 +171,8 @@ model = eval(args.model)(
         graph_args.END_TYPE, 
         hs=args.hs, 
         nz=args.nz, 
-        bidirectional=args.bidirectional
+        bidirectional=args.bidirectional,
+        beta = args.beta
         )
 if args.predictor:
     predictor = nn.Sequential(
@@ -168,7 +184,9 @@ if args.predictor:
     model.mseloss = nn.MSELoss(reduction='sum')
 # optimizer and scheduler
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
-scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=10, verbose=True)
+# optimizer = optim.SGD(model.parameters(), lr=args.lr)
+scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=50, verbose=True)
+# scheduler = CyclicLR(optimizer, base_lr=args.lr, max_lr = 0.1, cycle_momentum=False)
 
 model.to(device)
 
@@ -233,10 +251,11 @@ def train(epoch):
     return train_loss, recon_loss, kld_loss
 
 
+
 def visualize_recon(epoch):
     model.eval()
     # draw some reconstructed train/test graphs to visualize recon quality
-    for i, (g, y) in enumerate(test_data[:10]+train_data[:10]):
+    for i, g in enumerate(test_data[:1]):
         if args.model.startswith('SVAE'):
             g = g.to(device)
             g = model._collate_fn(g)
@@ -245,12 +264,26 @@ def visualize_recon(epoch):
         elif args.model.startswith('DVAE'):
             g_recon = model.encode_decode(g)[0]
         name0 = 'graph_epoch{}_id{}_original'.format(epoch, i)
-        plot_DAG(g, args.res_dir, name0, data_type=args.data_type)
+
+        save0 =  os.path.join(args.fig_dir, name0)
+        # plot_DAG(g, args.res_dir, name0, data_type=args.data_type)
+        g_x = g.to_networkx()
+        nx.draw_networkx(g_x)
+        plt.show()
+        plt.savefig(save0)
+        plt.close()
         name1 = 'graph_epoch{}_id{}_recon'.format(epoch, i)
-        plot_DAG(g_recon, args.res_dir, name1, data_type=args.data_type)
+        save1 = os.path.join(args.fig_dir, name1)
+        g_x_recon = g_recon.to_networkx()
+        nx.draw_networkx(g_x_recon)
+        plt.show()
+        plt.savefig(save1)
+        plt.close()
+        # ig.plot(g_recon, name1)
+        # plot_DAG(g_recon, args.res_dir, name1, data_type=args.data_type)
 
 
-def test():
+def test(fast_test = True):
     # test recon accuracy
     model.eval()
     encode_times = 10
@@ -263,6 +296,7 @@ def test():
     g_batch = []
     y_batch = []
     for i, g in enumerate(pbar):
+        # print("here")
         if args.model.startswith('SVAE'):
             g = g.to(device)
         g_batch.append(g)
@@ -272,32 +306,27 @@ def test():
             _, nll, _ = model.loss(mu, logvar, g)
             pbar.set_description('nll: {:.4f}'.format(nll.item()/len(g_batch)))
             Nll += nll.item()
-            if args.predictor:
-                y_batch = torch.FloatTensor(y_batch).unsqueeze(1).to(device)
-                y_pred = model.predictor(mu)
-                pred = model.mseloss(y_pred, y_batch)
-                pred_loss += pred.item()
+
             # construct igraph g from tensor g to check recon quality
-            if args.model.startswith('SVAE'):  
-                g = model.construct_igraph(g[:, :, :model.nvt], g[:, :, model.nvt:], False)
-            for _ in range(encode_times):
-                z = model.reparameterize(mu, logvar)
-                for _ in range(decode_times):
-                    g_recon = model.decode(z)
-                    n_perfect += sum(is_same_DAG(g0, g1) for g0, g1 in zip(g, g_recon))
+            if fast_test:
+                if args.model.startswith('SVAE'):  
+                    g = model.construct_igraph(g[:, :, :model.nvt], g[:, :, model.nvt:], False)
+                for _ in range(encode_times):
+                    z = model.reparameterize(mu, logvar)
+                    for _ in range(decode_times):
+                        g_recon = model.decode(z)
+                        n_perfect += sum(is_same_DAG(g0, g1) for g0, g1 in zip(g, g_recon))
             g_batch = []
             y_batch = []
     Nll /= len(test_data)
     pred_loss /= len(test_data)
     pred_rmse = math.sqrt(pred_loss)
-    acc = n_perfect / (len(test_data) * encode_times * decode_times)
-    if args.predictor:
-        print('Test average recon loss: {0}, recon accuracy: {1:.4f}, pred rmse: {2:.4f}'.format(
-            Nll, acc, pred_rmse))
-        return Nll, acc, pred_rmse
+    if fast_test:
+        acc = n_perfect / (len(test_data) * encode_times * decode_times)
+        return Nll,acc
     else:
-        print('Test average recon loss: {0}, recon accuracy: {1:.4f}'.format(Nll, acc))
-        return Nll, acc
+        print('Test average recon loss: {0}'.format(Nll))
+        return Nll
 
 
 def prior_validity(scale_to_train_range=False):
@@ -325,12 +354,10 @@ def prior_validity(scale_to_train_range=False):
             if scale_to_train_range:
                 z = z * z_std + z_mean  # move to train's latent range
             for j in range(decode_times):
-                print("z: " + str(len(z)))
                 g_batch = model.decode(z)
-                print("g batch: " + str(len(g_batch)))
                 G.extend(g_batch)
                 for g in g_batch:
-                    if is_valid_ENAS(g, graph_args.START_TYPE, graph_args.END_TYPE):
+                    if is_valid_BN(g, graph_args.START_TYPE, graph_args.END_TYPE):
                         n_valid += 1
                         G_valid.append(g)
 
@@ -374,9 +401,9 @@ def extract_latent(data):
 def save_latent_representations(epoch):
     Z_train, Y_train = extract_latent(train_data)
     Z_test, Y_test = extract_latent(test_data)
-    latent_pkl_name = os.path.join(args.res_dir, args.data_name +
+    latent_pkl_name = os.path.join(args.latent_dir, args.data_name +
                                    '_latent_epoch{}.pkl'.format(epoch))
-    latent_mat_name = os.path.join(args.res_dir, args.data_name + 
+    latent_mat_name = os.path.join(args.latent_dir, args.data_name + 
                                    '_latent_epoch{}.mat'.format(epoch))
     with open(latent_pkl_name, 'wb') as f:
         pickle.dump((Z_train, Y_train, Z_test, Y_test), f)
@@ -401,8 +428,9 @@ print("Loading train Data")
 # Vertices are taken in order following their index
 # Meaning that vertex with index 0 will be processed first
 # Therefore the newly added starting node has to have index:0 otherwise an exception is thrown
-for filename in os.listdir("..\\graph_data\\vertex_4"):
-    path = os.path.join("..\\graph_data\\vertex_4", filename)
+i = 0
+for filename in os.listdir("..\\graph_data\\vertex_4_new"):
+    path = os.path.join("..\\graph_data\\vertex_4_new", filename)
     with open(path, 'rb') as pickle_file:
         # Load file
         graph = pickle.load(pickle_file)
@@ -412,31 +440,34 @@ for filename in os.listdir("..\\graph_data\\vertex_4"):
         graph2.add_vertices(6)
         # Copy vertices to new graph
         for vs_i in range(len(graph.vs)):
-            graph2.vs[vs_i+1]['_nx_name'] =  graph.vs[vs_i]['_nx_name']
-            graph2.vs[vs_i+1]['type'] =  graph.vs[vs_i]['_nx_name']
+            graph2.vs[vs_i+1]['type'] =  graph.vs[vs_i]['type']+2
         # Copy edges to new graph
         for edge_pair in edge_list:
             p1 = edge_pair[0]
             p2 = edge_pair[1]
             graph2.add_edge(p1+1,p2+1)
         # Set vertex attributes
-        graph2.vs[0]['_nx_name'] = 4
-        graph2.vs[0]['type'] = 4
-        graph2.vs[5]['_nx_name'] = 5
-        graph2.vs[5]['type'] = 5
-        graph2.add_edge(0,1)
-        graph2.add_edge(4,5)
+        graph2.vs[0]['type'] = graph_args.START_TYPE
+        graph2.vs[5]['type'] = graph_args.END_TYPE
+        # graph2.add_edge(0,1)
+        # graph2.add_edge(4,5)
 
+        for vs_i,vs in enumerate(graph2.vs[1:-1]):
+            if(len(vs.in_edges()) == 0):
+                graph2.add_edge(0, vs_i+1)
+            if(len(vs.out_edges()) == 0):
+                graph2.add_edge(vs_i+1, len(graph2.vs)-1)
         all_data.append(graph2)
+
 
         
 
 
 random.shuffle(all_data)
 num_of_data = len(all_data)
-num_of_train = math.floor(2*num_of_data/3)
-train_data = all_data
-test_data = all_data
+num_of_train = math.floor(3*num_of_data/4)
+train_data = all_data[:num_of_train]
+test_data = all_data[num_of_train:]
 print(len(train_data))
 
 
@@ -472,36 +503,37 @@ for epoch in range(start_epoch + 1, args.epochs + 1):
     else:
         train_loss, recon_loss, kld_loss = train(epoch)
         pred_loss = 0.0
+    Nll = test(False)
     with open(loss_name, 'a') as loss_file:
-        loss_file.write("{:.2f} {:.2f} {:.2f} {:.2f}\n".format(
+        loss_file.write("{:.2f} {:.2f} {:.2f} {:.2f} {:.2f}\n".format(
             train_loss/len(train_data), 
             recon_loss/len(train_data), 
             kld_loss/len(train_data), 
             pred_loss/len(train_data), 
+            Nll
             ))
     scheduler.step(train_loss)
     if epoch % args.save_interval == 0:
         print("save current model...")
-        model_name = os.path.join(args.res_dir, 'model_checkpoint{}.pth'.format(epoch))
-        optimizer_name = os.path.join(args.res_dir, 'optimizer_checkpoint{}.pth'.format(epoch))
-        scheduler_name = os.path.join(args.res_dir, 'scheduler_checkpoint{}.pth'.format(epoch))
-        torch.save(model.state_dict(), model_name)
-        torch.save(optimizer.state_dict(), optimizer_name)
-        torch.save(scheduler.state_dict(), scheduler_name)
-        print("visualize reconstruction examples...")
-        # visualize_recon(epoch)
-        print("extract latent representations...")
-        save_latent_representations(epoch)
-        print("sample from prior...")
-        sampled = model.generate_sample(args.sample_number)
-        for i, g in enumerate(sampled):
-            namei = 'graph_{}_sample{}'.format(epoch, i)
-            # plot_DAG(g, args.res_dir, namei, data_type=args.data_type)
+        if epoch % (args.save_interval*5) == 0 and epoch >=200:
+            model_name = os.path.join(args.model_dir, 'model_checkpoint{}.pth'.format(epoch))
+            optimizer_name = os.path.join(args.optimizer_dir, 'optimizer_checkpoint{}.pth'.format(epoch))
+            scheduler_name = os.path.join(args.scheduler_dir, 'scheduler_checkpoint{}.pth'.format(epoch))
+            torch.save(model.state_dict(), model_name)
+            torch.save(optimizer.state_dict(), optimizer_name)
+            torch.save(scheduler.state_dict(), scheduler_name)
+        # print("visualize reconstruction examples...")
+            visualize_recon(epoch)
+            print("extract latent representations...")
+            save_latent_representations(epoch)
+            print("sample from prior...")
+        
         print("plot train loss...")
         losses = np.loadtxt(loss_name)
         if losses.ndim == 1:
             continue
         fig = plt.figure()
+        
         num_points = losses.shape[0]
         plt.plot(range(1, num_points+1), losses[:, 0], label='Total')
         plt.plot(range(1, num_points+1), losses[:, 1], label='Recon')
@@ -511,18 +543,16 @@ for epoch in range(start_epoch + 1, args.epochs + 1):
         plt.ylabel('Train loss')
         plt.legend()
         plt.savefig(loss_plot_name)
-        if epoch%40 == 0:
-            if args.predictor:
-                Nll, acc, pred_rmse = test()
-            else:
-                Nll, acc = test()
-                pred_rmse = 0
-            r_valid, r_unique, r_novel = prior_validity(True)
-            with open(test_results_name, 'a') as result_file:
-                result_file.write("Epoch {} Test recon loss: {} recon acc: {:.4f} r_valid: {:.4f}".format(
-                        epoch, Nll, acc, r_valid) + 
-                        " r_unique: {:.4f} r_novel: {:.4f} pred_rmse: {:.4f}\n".format(
-                            r_unique, r_novel, pred_rmse))
+        plt.close()
+    if epoch % (args.save_interval*5) == 0:
+        Nll, acc = test()
+        pred_rmse = 0
+        r_valid, r_unique, r_novel = prior_validity(True)
+        with open(test_results_name, 'a') as result_file:
+            result_file.write("Epoch {} Test recon loss: {} recon acc: {:.4f} r_valid: {:.4f}".format(
+                    epoch, Nll, acc, r_valid) + 
+                    " r_unique: {:.4f} r_novel: {:.4f} pred_rmse: {:.4f}\n".format(
+                        r_unique, r_novel, pred_rmse))
 # interpolation_exp2(epoch)
 # smoothness_exp(epoch)
 # interpolation_exp3(epoch)

@@ -21,7 +21,7 @@ matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from util import *
-from models import *
+from models2 import *
 from bayesian_optimization.evaluate_BN import Eval_BN
 from igraph import *
 import networkx as nx
@@ -30,50 +30,39 @@ import statistics
 import util
 
 
-
-
-
-
-
-
-
-
-
-
-
 parser = argparse.ArgumentParser(description='Train Variational Autoencoders for DAGs')
 # general settings
-parser.add_argument('--data-type', default='ENAS',
+parser.add_argument('--data-type', default='BN',
                     help='ENAS: ENAS-format CNN structures; BN: Bayesian networks')
 parser.add_argument('--data-name', default='final_structures6', help='graph dataset name')
 parser.add_argument('--nvt', type=int, default=6, help='number of different node types, \
                     6 for final_structures6, 8 for asia_200k')
 parser.add_argument('--save-appendix', default='', 
                     help='what to append to data-name as save-name for results')
-parser.add_argument('--save-interval', type=int, default=100, metavar='N',
+parser.add_argument('--save-interval', type=int, default=10, metavar='N',
                     help='how many epochs to wait each time to save model states')
-parser.add_argument('--sample-number', type=int, default=10000, metavar='N',
+parser.add_argument('--sample-number', type=int, default=20, metavar='N',
                     help='how many samples to generate each time')
 parser.add_argument('--no-test', action='store_true', default=False,
                     help='if True, merge test with train, i.e., no held-out set')
 parser.add_argument('--reprocess', action='store_true', default=False,
                     help='if True, reprocess data instead of using prestored .pkl data')
-parser.add_argument('--keep-old', action='store_true', default=False,
+parser.add_argument('--keep-old', action='store_true', default=True,
                     help='if True, do not remove any old data in the result folder')
 parser.add_argument('--only-test', action='store_true', default=False,
                     help='if True, perform some experiments without training the model')
 parser.add_argument('--small-train', action='store_true', default=False,
                     help='if True, use a smaller version of train set')
 # model settings
-parser.add_argument('--model', default='DVAE', help='model to use: DVAE, SVAE, \
+parser.add_argument('--model', default='DVAE_BN', help='model to use: DVAE, SVAE, \
                     DVAE_fast, DVAE_BN, SVAE_oneshot, DVAE_GCN')
 parser.add_argument('--load-latest-model', action='store_true', default=False,
                     help='whether to load latest_model.pth')
-parser.add_argument('--continue-from', type=int, default=None, 
+parser.add_argument('--continue-from', type=int, default=2000, 
                     help="from which epoch's checkpoint to continue training")
-parser.add_argument('--hs', type=int, default=150, metavar='N',
+parser.add_argument('--hs', type=int, default=256, metavar='N',
                     help='hidden size of GRUs')
-parser.add_argument('--nz', type=int, default=16, metavar='N',
+parser.add_argument('--nz', type=int, default=64, metavar='N',
                     help='number of dimensions of latent vectors z')
 parser.add_argument('--bidirectional', action='store_true', default=False,
                     help='whether to use bidirectional encoding')
@@ -83,9 +72,9 @@ parser.add_argument('--predictor', action='store_true', default=False,
 # optimization settings
 parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
                     help='learning rate (default: 1e-4)')
-parser.add_argument('--epochs', type=int, default=500, metavar='N',
+parser.add_argument('--epochs', type=int, default=6000, metavar='N',
                     help='number of epochs to train')
-parser.add_argument('--batch-size', type=int, default=32, metavar='N',
+parser.add_argument('--batch-size', type=int, default=1024, metavar='N',
                     help='batch size during training')
 parser.add_argument('--infer-batch-size', type=int, default=128, metavar='N',
                     help='batch size during inference')
@@ -93,7 +82,7 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--all-gpus', action='store_true', default=False,
                     help='use all available GPUs')
-parser.add_argument('--seed', type=int, default=5, metavar='S',
+parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 
 args = parser.parse_args()
@@ -118,7 +107,7 @@ random.seed(args.seed)
 
 
 graph_args.max_n = 6
-graph_args.num_vertex_type = 3
+graph_args.num_vertex_type = 6
 graph_args.START_TYPE = 0
 graph_args.END_TYPE = 1
 
@@ -137,7 +126,7 @@ model = eval(args.model)(
 model.to(device)
 args.file_dir = os.path.dirname(os.path.realpath('__file__'))
 
-args.res_dir = os.path.join(args.file_dir, 'vertex_4_same_label_batch_2_data_35_smaller_model/{}{}'.format(args.data_name, 
+args.res_dir = os.path.join(args.file_dir, 'vertex_4/{}{}'.format(args.data_name, 
                                                                  args.save_appendix))
 
 all_data = []
@@ -173,117 +162,91 @@ for filename in os.listdir("..\\graph_data\\vertex_4"):
         all_data.append(graph2)
 
 
+def interpolation_great_circle(ix,g):
+    interpolate_number = 36
+    z0, _ = model.encode(g)
+    norm0 = torch.norm(z0)
+    z1 = torch.ones_like(z0)
+    dim_to_change = random.randint(0, z0.shape[1]-1)  # this to get different great circles
+    print(dim_to_change)
+    z1[0, dim_to_change] = -(z0[0, :].sum() - z0[0, dim_to_change]) / z0[0, dim_to_change]
+    z1 = z1 / torch.norm(z1) * norm0
+    print('z0: ', z0, 'z1: ', z1, 'dot product: ', (z0 * z1).sum().item())
+    print('norm of z0: {}, norm of z1: {}'.format(norm0, torch.norm(z1)))
+    print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
+    omega = torch.acos(torch.dot(z0.flatten(), z1.flatten()))
+    print('angle between z0 and z1: {}'.format(omega))
+    Z = []  # to store all the interpolation points
+    for j in range(0, interpolate_number + 1):
+        theta = 2*math.pi / interpolate_number * j
+        zj = z0 * np.cos(theta) + z1 * np.sin(theta)
+        Z.append(zj)
+    Z = torch.cat(Z, 0)
+    # decode many times and select the most common one
+    G, _ = decode_from_latent_space(Z, model, return_igraph=True, data_type=args.data_type)
+    for ix_i,g_s in enumerate(G):
+        name0 = 'graph_id{}_sampled{}'.format(ix,ix_i)
+        save0 =  os.path.join(args.res_dir,"interpolated", str(ix))
+        if not os.path.exists(save0):
+            os.makedirs(save0)
+        final_save = os.path.join(save0,name0)
+        my_plot_DAG(final_save, g_s)
 
+def my_plot_DAG(save_path, g):
+    g_x = g.to_networkx()
+    nx.draw_networkx(g_x)
+    plt.show()
+    plt.savefig(save_path)
+    plt.close()
 
-
-
-def visualize_recon(g):
+def visualize_recon(ix,g):
     model.eval()
     # draw some reconstructed train/test graphs to visualize recon quality
     g_recon = model.encode_decode(g)[0]
-    name0 = 'graph_epoch_original'
-    plot_DAG(g, args.res_dir, name0, data_type=args.data_type)
-    name1 = 'graph_epoch_recon'
-    plot_DAG(g_recon, args.res_dir, name1, data_type=args.data_type)
+
+    name0 = 'graph_id{}_original'.format(ix)
+    save0 =  os.path.join(args.res_dir,"graphs", name0)
+    print(save0)
+    # plot_DAG(g, args.res_dir, name0, data_type=args.data_type)
+    g_x = g.to_networkx()
+    nx.draw_networkx(g_x)
+    plt.show()
+    plt.savefig(save0)
+    plt.close()
+    name1 = 'graph_id{}_recon'.format(ix)
+    save1 = os.path.join(args.res_dir,"graphs", name1)
+    g_x_recon = g_recon.to_networkx()
+    nx.draw_networkx(g_x_recon)
+    plt.show()
+    plt.savefig(save1)
+    plt.close()
 
 
+q = 6000
+p = os.path.join(args.res_dir, 'model_checkpoint'+str(q)+'.pth')
+load_module_state(model,p)
+
+# for ix,g in enumerate(all_data):
+#     print("Visualizing graph_{}: ".format(ix) + str(g))
+#     visualize_recon(ix,g)
+#     input()
+
+G = model.generate_sample(10)
+
+for ix,g in enumerate(G):
+    print("Printing graph:{}\n{}".format(ix,g))
+    interpolation_great_circle(ix,g)
+    # name0 = 'graph_id{}_sampled'.format(ix)
+    # save0 = save0 =  os.path.join(args.res_dir,"sampled", name0)
+    # g_x = g.to_networkx()
+    # nx.draw_networkx(g_x)
+    # plt.show()
+    # plt.savefig(save0)
+    # plt.close()
+    input()
     
 
-
-
-min_var = 5000
-min_var_ix = -1
-
-for q in range(50,60,10): 
-    invalids = []                                                                       
-    p = os.path.join(args.res_dir, 'model_checkpoint'+str(q)+'.pth')
-    load_module_state(model, p)
-    occurences = []
-    # graph_list = []
-    ic = 0
-    invalid = 0
-    print("START")
-    for ix, graph_occ in enumerate(all_data):
-        graph = graph_occ[0]
-        graph = [graph]
-        graph = model._collate_fn(graph)
-        g_recons = []
-        for decodenumber in range(1):
-            g_recons.append(model.encode_decode(graph)[0])
-        
-        g_recon = g_recons[0]
-
-        # print(graph[0])
-        # for vs in graph[0].vs:
-        #     print(vs["type"])
-        # print(g_recon)
-        # for vs in g_recon.vs:
-        #     print(vs["type"])
-        # print(util.is_same_DAG(graph[0],g_recon))
-        # print("----")
-        # input()
-        ix_list = []
-        for vs in g_recon.vs:
-            if vs["type"] == graph_args.END_TYPE or vs["type"] == graph_args.START_TYPE:
-                ix_list.append(vs.index)
-        g_s = g_recon.copy()
-        g_recon.delete_vertices(ix_list)
-
-        b = False
-
-        for ix2, g2 in enumerate(all_data):
-            ix_list = []
-
-            for vs in g2[0].vs:
-                 if vs["type"] == graph_args.END_TYPE or vs["type"] == graph_args.START_TYPE:
-                    ix_list.append(vs.index)
-            g2[0].delete_vertices(ix_list)
-            if util.is_same_DAG(g2[0],g_recon):
-                all_data[ix2][1] += 1
-                print("Indexes: " + str(ix) + " - " +str(ix2))
-                b = True
-                # break
-        if not b:
-            invalids.append(graph[0])
-            invalid += 1
-
         
 
         
-
-    not_null = 0
-    max = 0
-    max_g = ""
-    for gm in all_data:
-        # print(gm[1])
-        if gm[1] > 0:
-            not_null +=1
-
-        if gm[1] > max:
-            max = gm[1]
-            max_g = gm[0]
-    print("---------")
-    occ = [gm[1] for gm in all_data]
-    occ_var = statistics.variance(occ)
-    if occ_var < min_var:
-        min_var = occ_var
-        min_var_ix = q
-    print(occ)
-    # for g in invalids:
-    #     g_re = model.encode_decode(g)
-    #     print(model.encode(g_re))
-    #     print(g)
-    #     print(g_re[0])
-        # input()
-    print(not_null)
-    print(max)
-    print(max_g)
-    print(invalid)
-
-    for gm in all_data:
-        gm[1] = 0
-
-    
-print(min_var)
-print(min_var_ix)
 
