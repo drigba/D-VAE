@@ -45,14 +45,14 @@ class DVAE(nn.Module):
         self.fc3 = nn.Linear(nz, hs)  # from latent z to initial hidden state h0
         self.add_vertex = nn.Sequential(
                 nn.Linear(hs, hs * 2),
-                nn.BatchNorm1d(hs*2, track_running_stats=False),
+                nn.BatchNorm1d(hs*2, momentum=0.5),
                 nn.ReLU(),
                 nn.Linear(hs * 2, nvt)
                 )  # which type of new vertex to add f(h0, hg)
 
         self.add_edge = nn.Sequential(
                 nn.Linear(hs * 3, hs), 
-                nn.BatchNorm1d(hs, track_running_stats=False),
+                nn.BatchNorm1d(hs, momentum=0.5),
                 nn.ReLU(), 
                 nn.Linear(hs, 1)
                 )  # whether to add edge between v_i and v_new, f(hvi, hnew, h0)

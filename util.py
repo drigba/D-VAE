@@ -1,6 +1,7 @@
 from __future__ import print_function
 from cProfile import label
 import gzip
+from math import inf
 import pickle
 import numpy as np
 import torch
@@ -12,8 +13,9 @@ import subprocess
 import collections
 import igraph
 import argparse
+import math
 import pdb
-import pygraphviz as pgv
+# import pygraphviz as pgv
 import sys
 from PIL import Image
 import math
@@ -387,6 +389,23 @@ def plot_DAG(g, res_dir, name, backbone=False, data_type='ENAS', pdf=False):
 #                 graph.add_edge(node, idx, weight=0)
 #     graph.layout(prog='dot')
 #     graph.draw(path)
+# def draw_network(g, path, backbone=False):
+#     graph = pgv.AGraph(directed=True, strict=True, fontname='Helvetica', arrowtype='open')
+#     if g is None:
+#         add_node(graph, 0, 0)
+#         graph.layout(prog='dot')
+#         graph.draw(path)
+#         return
+#     for idx in range(g.vcount()):
+#         add_node(graph, idx, g.vs[idx]['type'])
+#     for idx in range(g.vcount()):
+#         for node in g.get_adjlist(igraph.IN)[idx]:
+#             if node == idx-1 and backbone:
+#                 graph.add_edge(node, idx, weight=1)
+#             else:
+#                 graph.add_edge(node, idx, weight=0)
+#     graph.layout(prog='dot')
+#     graph.draw(path)
 
 
 def add_node(graph, node_id, label, shape='box', style='filled'):
@@ -426,29 +445,28 @@ def add_node(graph, node_id, label, shape='box', style='filled'):
 
 def draw_BN(g, path):
     graph = pgv.AGraph(directed=True, strict=True, fontname='Helvetica', arrowtype='open')
-    label_dict = dict(zip(range(2, 39), range(2, 39)))
-    print(label_dict)
+    label_dict = dict(zip(range(2, 10), 'ASTLBEXD'))
     pos_dict = dict(zip(range(2, 10), ['0, 3!', '2.75, 3!', '0, 2!', '2, 2!', '3.5, 1!', '1.5, 1!', '1.5, 0!', '3.5, 0!']))
 
-    def add_node(graph, node_id, label, shape='circle', style='filled'):
-        if label in {0, 1}:
-            return
-        else:
-            label, pos = label_dict[label], pos_dict[label]
-        graph.add_node(
-                node_id, label=label, color='black', fillcolor='white',
-                shape=shape, style=style, pos=pos, fontsize=27,
-        )
-        return
+#     def add_node(graph, node_id, label, shape='circle', style='filled'):
+#         if label in {0, 1}:
+#             return
+#         else:
+#             label, pos = label_dict[label], pos_dict[label]
+#         graph.add_node(
+#                 node_id, label=label, color='black', fillcolor='white',
+#                 shape=shape, style=style, pos=pos, fontsize=27,
+#         )
+#         return
 
-    if g is None:
-        graph.add_node(
-                0, label='invalid', color='black', fillcolor='white', 
-                shape='box', style='filled', 
-        )
-        graph.layout(prog='dot')
-        graph.draw(path)
-        return
+#     if g is None:
+#         graph.add_node(
+#                 0, label='invalid', color='black', fillcolor='white', 
+#                 shape='box', style='filled', 
+#         )
+#         graph.layout(prog='dot')
+#         graph.draw(path)
+#         return
 
     for idx in range(1, g.vcount()-1):
         print( g.vs[idx]['type'])
@@ -459,10 +477,18 @@ def draw_BN(g, path):
             node_type = g.vs[node]['type']
             if node_type != 0 and node_type != 1:  # we don't draw input/output nodes for BN
                 graph.add_edge(node, idx)
+#     for idx in range(1, g.vcount()-1):
+#         add_node(graph, idx, g.vs[idx]['type'])
+#     for idx in range(1, g.vcount()-1):
+#         for node in g.get_adjlist(igraph.IN)[idx]:
+#             #if node != g.vcount()-1 and node != 0:  # we don't draw input/output nodes for BN
+#             node_type = g.vs[node]['type']
+#             if node_type != 0 and node_type != 1:  # we don't draw input/output nodes for BN
+#                 graph.add_edge(node, idx)
 
-    graph.layout()
-    graph.draw(path)
-    return path
+#     graph.layout()
+#     graph.draw(path)
+#     return path
 
 
 '''Validity and novelty functions'''
@@ -486,6 +512,8 @@ def ratio_same_DAG(G0, G1):
             if is_same_DAG(g1, g0):
                 res += 1
                 break
+    if len(G1) == 0:
+        return inf
     return res / len(G1)
 
 
@@ -514,6 +542,7 @@ def is_valid_DAG(g, START_TYPE=0, END_TYPE=1):
 def is_valid_ENAS(g, START_TYPE=0, END_TYPE=1):
     # first need to be a valid DAG computation graph
     res = is_valid_DAG(g, START_TYPE, END_TYPE)
+
     # in addition, node i must connect to node i+1
     for i in range(g.vcount()-2):
         res = res and g.are_connected(i, i+1)
