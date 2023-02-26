@@ -113,7 +113,6 @@ class DVAE(nn.Module):
             x = torch.zeros((len(idx), length)).scatter_(1, idx, 1).to(self.get_device())
         else:
             idx = torch.LongTensor([idx]).unsqueeze(0)
-            
             x = torch.zeros((1, length)).scatter_(1, idx, 1).to(self.get_device())
         return x
 
@@ -242,31 +241,6 @@ class DVAE(nn.Module):
         # such that Hvi and H do not contain any initial H0 information
         return self.sigmoid(self.add_edge(torch.cat([Hvi, H, H0], 1)))
 
-    def _update_edges(self, G, H0, idx, finished, new_types, stochastic):
-        for vi in range(idx-1, -1, -1):
-            Hvi = self._get_vertex_state(G, vi)
-            H = self._get_vertex_state(G, idx)
-            ei_score = self._get_edge_score(Hvi, H, H0)
-            if stochastic:
-                random_score = torch.rand_like(ei_score)
-                decisions = random_score < ei_score
-            else:
-                decisions = ei_score > 0.5
-            for i, g in enumerate(G):
-                if finished[i]:
-                    continue
-                if new_types[i] == self.END_TYPE: 
-                # if new node is end_type, connect it to all loose-end vertices (out_degree==0)
-                    end_vertices = set([v.index for v in g.vs.select(_outdegree_eq=0) 
-                                        if v.index != g.vcount()-1])
-                    for v in end_vertices:
-                        g.add_edge(v, g.vcount()-1)
-                    finished[i] = True
-                    continue
-                if decisions[i, 0]:
-                    g.add_edge(vi, g.vcount()-1)
-            self._update_v(G, idx)
-
     def decode(self, z, stochastic=True):
         # decode latent vectors z back to graphs
         # if stochastic=True, stochastically sample each action from the predicted distribution;
@@ -295,15 +269,36 @@ class DVAE(nn.Module):
                 if not finished[i]:
                     g.add_vertex(type=new_types[i])
             self._update_v(G, idx)
-            # idx, G, H, H0,idx,finished, new_types
+
             # decide connections
-            self._update_edges(G, H0,idx,finished, new_types,stochastic)
+            edge_scores = []
+            for vi in range(idx-1, -1, -1):
+                Hvi = self._get_vertex_state(G, vi)
+                H = self._get_vertex_state(G, idx)
+                ei_score = self._get_edge_score(Hvi, H, H0)
+                if stochastic:
+                    random_score = torch.rand_like(ei_score)
+                    decisions = random_score < ei_score
+                else:
+                    decisions = ei_score > 0.5
+                for i, g in enumerate(G):
+                    if finished[i]:
+                        continue
+                    if new_types[i] == self.END_TYPE: 
+                    # if new node is end_type, connect it to all loose-end vertices (out_degree==0)
+                        end_vertices = set([v.index for v in g.vs.select(_outdegree_eq=0) 
+                                            if v.index != g.vcount()-1])
+                        for v in end_vertices:
+                            g.add_edge(v, g.vcount()-1)
+                        finished[i] = True
+                        continue
+                    if decisions[i, 0]:
+                        g.add_edge(vi, g.vcount()-1)
+                self._update_v(G, idx)
 
         for g in G:
             del g.vs['H_forward']  # delete hidden states to save GPU memory
         return G
-
-    
 
     def loss(self, mu, logvar, G_true):
         # compute the loss of decoding mu and logvar to true graphs using teacher forcing
@@ -393,34 +388,3 @@ class DVAE_NOBATCHNORM(DVAE):
                 nn.ReLU(),
                 nn.Linear(hs * 2, nvt)
                 )  # which type of new vertex to add f(h0, hg)
-
-
-class DVAE_NOBATCHNORM_ROW(DVAE_NOBATCHNORM):
-    # Update_v only at the end of _update_edges -> after row completion 
-    def __init__(self, max_n, nvt, START_TYPE, END_TYPE, hs=501, nz=56, bidirectional=False, beta =0.01):
-        super(DVAE_NOBATCHNORM_ROW, self).__init__(max_n, nvt, START_TYPE, END_TYPE, hs, nz, bidirectional, beta)
-
-    def _update_edges(self, G, H0, idx, finished, new_types, stochastic):
-        for vi in range(idx-1, -1, -1):
-            Hvi = self._get_vertex_state(G, vi)
-            H = self._get_vertex_state(G, idx)
-            ei_score = self._get_edge_score(Hvi, H, H0)
-            if stochastic:
-                random_score = torch.rand_like(ei_score)
-                decisions = random_score < ei_score
-            else:
-                decisions = ei_score > 0.5
-            for i, g in enumerate(G):
-                if finished[i]:
-                    continue
-                if new_types[i] == self.END_TYPE: 
-                # if new node is end_type, connect it to all loose-end vertices (out_degree==0)
-                    end_vertices = set([v.index for v in g.vs.select(_outdegree_eq=0) 
-                                        if v.index != g.vcount()-1])
-                    for v in end_vertices:
-                        g.add_edge(v, g.vcount()-1)
-                    finished[i] = True
-                    continue
-                if decisions[i, 0]:
-                    g.add_edge(vi, g.vcount()-1)
-        self._update_v(G, idx)
