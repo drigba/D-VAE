@@ -115,7 +115,7 @@ print(args)
 counter = 1
 model_name = "NObatch" if args.model == "DVAE_NOBATCHNORM" else "YESbatch"
 args.file_dir = os.path.dirname(os.path.realpath('__file__'))
-args.res_dir = os.path.join(args.file_dir, 'vertex_{}_{}dim_latent_KL{}_{}_hs{}_batchsize{}/{}{}_{}'.format(args.max_n-2,args.nz,args.beta,model_name,args.hs,args.batch_size,args.data_name, 
+args.res_dir = os.path.join(args.file_dir, 'vertex_{}_{}dim_latent_KL{}_{}_hs{}_batchsize{}/{}{}_{}'.format(args.nvt-2,args.nz,args.beta,model_name,args.hs,args.batch_size,args.data_name, 
                                                                  args.save_appendix, counter))
 
 
@@ -180,8 +180,8 @@ print('Command line input: ' + cmd_input + ' is saved.')
 # bidirectional = False by default
 # args.predictor = False
 # args.continue_from = None
-graph_args.max_n = args.max_n
-graph_args.num_vertex_type = args.nvt
+graph_args.max_n = args.nvt
+graph_args.num_vertex_type = args.max_n
 graph_args.START_TYPE = 0
 graph_args.END_TYPE = 1
 
@@ -465,7 +465,7 @@ for filename in tqdm(os.listdir(graph_data_path)):
         edge_list = graph.get_edgelist()
         # Create new graph
         graph2 = ig.Graph(directed=True)
-        graph2.add_vertices(args.max_n)
+        graph2.add_vertices(args.nvt)
         # Copy vertices to new graph
         for vs_i in range(len(graph.vs)):
             graph2.vs[vs_i+1]['type'] =  graph.vs[vs_i]['_nx_name']+2
@@ -476,7 +476,7 @@ for filename in tqdm(os.listdir(graph_data_path)):
             graph2.add_edge(p1+1,p2+1)
         # Set vertex attributes
         graph2.vs[0]['type'] = graph_args.START_TYPE
-        graph2.vs[args.max_n-1]['type'] = graph_args.END_TYPE
+        graph2.vs[args.nvt-1]['type'] = graph_args.END_TYPE
         # graph2.add_edge(0,1)
         # graph2.add_edge(4,5)
 
