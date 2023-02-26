@@ -1,4 +1,5 @@
 from __future__ import print_function
+from cProfile import label
 import gzip
 from math import inf
 import pickle
@@ -17,7 +18,7 @@ import pdb
 # import pygraphviz as pgv
 import sys
 from PIL import Image
-
+import math
 # create a parser to save graph arguments
 cmd_opt = argparse.ArgumentParser()
 graph_args, _ = cmd_opt.parse_known_args()
@@ -388,6 +389,23 @@ def plot_DAG(g, res_dir, name, backbone=False, data_type='ENAS', pdf=False):
 #                 graph.add_edge(node, idx, weight=0)
 #     graph.layout(prog='dot')
 #     graph.draw(path)
+# def draw_network(g, path, backbone=False):
+#     graph = pgv.AGraph(directed=True, strict=True, fontname='Helvetica', arrowtype='open')
+#     if g is None:
+#         add_node(graph, 0, 0)
+#         graph.layout(prog='dot')
+#         graph.draw(path)
+#         return
+#     for idx in range(g.vcount()):
+#         add_node(graph, idx, g.vs[idx]['type'])
+#     for idx in range(g.vcount()):
+#         for node in g.get_adjlist(igraph.IN)[idx]:
+#             if node == idx-1 and backbone:
+#                 graph.add_edge(node, idx, weight=1)
+#             else:
+#                 graph.add_edge(node, idx, weight=0)
+#     graph.layout(prog='dot')
+#     graph.draw(path)
 
 
 def add_node(graph, node_id, label, shape='box', style='filled'):
@@ -425,10 +443,10 @@ def add_node(graph, node_id, label, shape='box', style='filled'):
             shape=shape, style=style, fontsize=24)
 
 
-# def draw_BN(g, path):
-#     graph = pgv.AGraph(directed=True, strict=True, fontname='Helvetica', arrowtype='open')
-#     label_dict = dict(zip(range(2, 10), 'ASTLBEXD'))
-#     pos_dict = dict(zip(range(2, 10), ['0, 3!', '2.75, 3!', '0, 2!', '2, 2!', '3.5, 1!', '1.5, 1!', '1.5, 0!', '3.5, 0!']))
+def draw_BN(g, path):
+    graph = pgv.AGraph(directed=True, strict=True, fontname='Helvetica', arrowtype='open')
+    label_dict = dict(zip(range(2, 10), 'ASTLBEXD'))
+    pos_dict = dict(zip(range(2, 10), ['0, 3!', '2.75, 3!', '0, 2!', '2, 2!', '3.5, 1!', '1.5, 1!', '1.5, 0!', '3.5, 0!']))
 
 #     def add_node(graph, node_id, label, shape='circle', style='filled'):
 #         if label in {0, 1}:
@@ -450,6 +468,15 @@ def add_node(graph, node_id, label, shape='box', style='filled'):
 #         graph.draw(path)
 #         return
 
+    for idx in range(1, g.vcount()-1):
+        print( g.vs[idx]['type'])
+        add_node(graph, idx, g.vs[idx]['type'])
+    for idx in range(1, g.vcount()-1):
+        for node in g.get_adjlist(igraph.IN)[idx]:
+            #if node != g.vcount()-1 and node != 0:  # we don't draw input/output nodes for BN
+            node_type = g.vs[node]['type']
+            if node_type != 0 and node_type != 1:  # we don't draw input/output nodes for BN
+                graph.add_edge(node, idx)
 #     for idx in range(1, g.vcount()-1):
 #         add_node(graph, idx, g.vs[idx]['type'])
 #     for idx in range(1, g.vcount()-1):

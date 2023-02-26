@@ -113,6 +113,7 @@ class DVAE(nn.Module):
             x = torch.zeros((len(idx), length)).scatter_(1, idx, 1).to(self.get_device())
         else:
             idx = torch.LongTensor([idx]).unsqueeze(0)
+            
             x = torch.zeros((1, length)).scatter_(1, idx, 1).to(self.get_device())
         return x
 
