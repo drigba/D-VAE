@@ -21,7 +21,6 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from util import *
 from modelsRIGHT import *
-from bayesian_optimization.evaluate_BN import Eval_BN
 from igraph import *
 import networkx as nx
 from collections import Counter
@@ -253,21 +252,21 @@ def is_same_DAG2(g0, g1):
                 return False
     return True
 
-def visualize_recon(model,data,epoch):
+def visualize_recon(model,data,epoch, fig_dir):
     model.eval()
     # draw some reconstructed train/test graphs to visualize recon quality
     for i, g in enumerate(data[:1]):
         g_recon = model.encode_decode(g)[0]
         name0 = 'graph_epoch{}_id{}_original'.format(epoch, i)
 
-        save0 =  os.path.join(args.fig_dir, name0)
+        save0 =  os.path.join(fig_dir, name0)
         g_x = g.to_networkx()
         nx.draw_networkx(g_x)
         plt.show()
         plt.savefig(save0)
         plt.close()
         name1 = 'graph_epoch{}_id{}_recon'.format(epoch, i)
-        save1 = os.path.join(args.fig_dir, name1)
+        save1 = os.path.join(fig_dir, name1)
         g_x_recon = g_recon.to_networkx()
         nx.draw_networkx(g_x_recon)
         plt.show()

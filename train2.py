@@ -26,7 +26,6 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from util import *
 from modelsRIGHT import *
-from bayesian_optimization.evaluate_BN import Eval_BN
 import networkx as nx
 import json
 
@@ -155,7 +154,7 @@ for f in remove_list:
 
 if not args.keep_old:
     # backup current .py files
-    copy('train.py', args.res_dir)
+    copy('train2.py', args.res_dir)
     copy('modelsRIGHT.py', args.res_dir)
     copy('util.py', args.res_dir)
 
@@ -456,7 +455,7 @@ print("Loading train Data")
 # Meaning that vertex with index 0 will be processed first
 # Therefore the newly added starting node has to have index:0 otherwise an exception is thrown
 i = 0
-graph_data_file_path = os.path.join("..", "graph_data")
+graph_data_file_path = os.path.join("..", "graph_data", "vertex5")
 for g_ix,filename in enumerate(tqdm(os.listdir(graph_data_file_path))):
     path = os.path.join(graph_data_file_path, filename)
     with open(path, 'rb') as pickle_file:
@@ -570,15 +569,6 @@ for epoch in range(start_epoch + 1, args.epochs + 1):
         plt.legend()
         plt.savefig(loss_plot_name)
         plt.close()
-    # if epoch % (args.save_interval*5) == 0:
-    #     Nll, acc = test()
-    #     pred_rmse = 0
-    #     r_valid, r_unique, r_novel = prior_validity(True)
-    #     with open(test_results_name, 'a') as result_file:
-    #         result_file.write("Epoch {} Test recon loss: {} recon acc: {:.4f} r_valid: {:.4f}".format(
-    #                 epoch, Nll, acc, r_valid) + 
-    #                 " r_unique: {:.4f} r_novel: {:.4f} pred_rmse: {:.4f}\n".format(
-    #                     r_unique, r_novel, pred_rmse))
 
         
 

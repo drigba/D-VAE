@@ -297,31 +297,7 @@ class DVAE(nn.Module):
             self._update_v(G, idx)
             # idx, G, H, H0,idx,finished, new_types
             # decide connections
-            edge_scores = []
             self._update_edges(G, H0,idx,finished, new_types,stochastic)
-            # for vi in range(idx-1, -1, -1):
-            #     Hvi = self._get_vertex_state(G, vi)
-            #     H = self._get_vertex_state(G, idx)
-            #     ei_score = self._get_edge_score(Hvi, H, H0)
-            #     if stochastic:
-            #         random_score = torch.rand_like(ei_score)
-            #         decisions = random_score < ei_score
-            #     else:
-            #         decisions = ei_score > 0.5
-            #     for i, g in enumerate(G):
-            #         if finished[i]:
-            #             continue
-            #         if new_types[i] == self.END_TYPE: 
-            #         # if new node is end_type, connect it to all loose-end vertices (out_degree==0)
-            #             end_vertices = set([v.index for v in g.vs.select(_outdegree_eq=0) 
-            #                                 if v.index != g.vcount()-1])
-            #             for v in end_vertices:
-            #                 g.add_edge(v, g.vcount()-1)
-            #             finished[i] = True
-            #             continue
-            #         if decisions[i, 0]:
-            #             g.add_edge(vi, g.vcount()-1)
-            #     self._update_v(G, idx)
 
         for g in G:
             del g.vs['H_forward']  # delete hidden states to save GPU memory
