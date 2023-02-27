@@ -276,6 +276,5 @@ def visualize_recon(model,data,epoch, fig_dir):
 def DAG_hash(graph) -> int:
         g = graph
         nodeTypes = sorted(g.vs["type"])
-        print("works")
         n2 =  "".join([str(nodeType) for nodeType in nodeTypes + [0]] + [str(neighbour)  for nodeType in nodeTypes for neighbour in sorted([g.vs[nodeIndex]["type"] for nodeIndex in g.neighbors(g.vs.find(type = nodeType), 'in')])+[0]])
         return int(n2)
