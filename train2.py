@@ -57,11 +57,11 @@ parser.add_argument('--small-train', action='store_true', default=False,
 # model settings
 parser.add_argument('--model', default='DVAE_NOBATCHNORM_ROW', help='model to use: DVAE, DVAE_NOBATCHNORM, DVAE_NOBATCHNORM_ROW')
 
-parser.add_argument('--hs', type=int, default=256, metavar='N',
+parser.add_argument('--hs', type=int, default=128, metavar='N',
                     help='hidden size of GRUs')
 parser.add_argument('--nz', type=int, default=7, metavar='N',
                     help='number of dimensions of latent vectors z')
-parser.add_argument('--beta', type=int, default=0.01, metavar='S',
+parser.add_argument('--beta', type=int, default=0.1, metavar='S',
                     help='KL divergence weight in loss (default:0.01)')
 parser.add_argument('--save-start', type=int, default=0, metavar='N',
                     help='how many epochs to wait to start saving model states')   
@@ -455,7 +455,7 @@ print("Loading train Data")
 # Meaning that vertex with index 0 will be processed first
 # Therefore the newly added starting node has to have index:0 otherwise an exception is thrown
 i = 0
-graph_data_file_path = os.path.join("..", "graph_data", "vertex5")
+graph_data_file_path = os.path.join("..", "graph_data", "vertex_5")
 for g_ix,filename in enumerate(tqdm(os.listdir(graph_data_file_path))):
     path = os.path.join(graph_data_file_path, filename)
     with open(path, 'rb') as pickle_file:
