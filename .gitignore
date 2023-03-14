@@ -13,3 +13,4 @@ vertex_4*
 *.pyc
 results*
 nohup.out
+*.tar.gz
