@@ -13,6 +13,7 @@ vertex_4*
 *.pyc
 results*
 nohup.out
+<<<<<<< HEAD
 *.log
 sachs*
 
