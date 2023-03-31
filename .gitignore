@@ -15,4 +15,4 @@ results*
 nohup.out
 *.log
 sachs*
-
+*.tar.gz
