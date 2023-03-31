@@ -13,3 +13,6 @@ vertex_4*
 *.pyc
 results*
 nohup.out
+*.log
+sachs*
+

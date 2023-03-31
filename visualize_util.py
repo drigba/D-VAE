@@ -34,7 +34,7 @@ import pandas as pd
 import json
 from scipy.stats import wasserstein_distance
 from wrapper import GraphWrapper
-
+import importlib
 
 
 
@@ -88,6 +88,7 @@ def prior_validity(model, latents, data, batch_size, latent_points):
 
 
 def interpolate1_randomPoints( model, latents,n_split):
+    model.eval()
     z1 = torch.randn(1,model.nz).to(model.get_device())
     z2 = torch.randn(1,model.nz).to(model.get_device())
     Z_train = latents
@@ -97,6 +98,10 @@ def interpolate1_randomPoints( model, latents,n_split):
     z2 = z2 * z_std + z_mean
     z_diff = (z1-z2)/n_split
     points = []
+    ncols = 3
+    nrows = math.ceil((n_split+1)/ncols)
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    axs = axs.flatten()
     for i in range(n_split+1):
         offset = z_diff*i
         c_z = offset+z2
@@ -105,8 +110,9 @@ def interpolate1_randomPoints( model, latents,n_split):
         g = model.decode(c_z)
         g_x = g[0].to_networkx()
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos)
-        plt.show()
+        nx.draw_networkx(g_x, pos=pos, ax = axs[i])
+    plt.subplots_adjust(hspace=0.2, wspace=0.2)
+    plt.show()
     points = np.array(points)
     print(np.shape(points))
     points = points.reshape((n_split+1,model.nz))
@@ -114,10 +120,10 @@ def interpolate1_randomPoints( model, latents,n_split):
     components = pca.fit_transform(points)
     plt.scatter(components[:,0], components[:,1])
     plt.scatter(points[:,0], points[:,1])
-    for point in points:
-        print(point)
-    for component in components:
-        print(component)
+    # for point in points:
+    #     print(point)
+    # for component in components:
+    #     print(component)
     return components
 
 
@@ -131,6 +137,10 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
     z2 = z2 * z_std + z_mean
     z_diff = (z1-z2)/n_split
     points = []
+    ncols = 3
+    nrows = math.ceil((n_split+1)/ncols)
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    axs = axs.flatten()
     for i in range(n_split+1):
         offset = z_diff*i
         c_z = offset+z2
@@ -140,8 +150,8 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
         g, _ = decode_from_latent_space(c_z,model,decode_times,'variable',True, 'BN')
         g_x = g[0].to_networkx()
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos)
-        plt.show()
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i])
+    plt.show()
     points = np.array(points)
     print(np.shape(points))
     points = points.reshape((n_split+1,model.nz))
@@ -149,13 +159,14 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
     components = pca.fit_transform(points)
     plt.scatter(components[:,0], components[:,1])
     plt.scatter(points[:,0], points[:,1])
-    for point in points:
-        print(point)
-    for component in components:
-        print(component)
+    # for point in points:
+    #     print(point)
+    # for component in components:
+    #     print(component)
     return components
 
 def interpolate2_randomGraphs(model, data,latents,n_split, decode_times):
+    model.eval()
     g_s = random.sample(data,2)
     z1 = model.encode(g_s[0])[0]
     z2 = model.encode(g_s[1])[0]
@@ -166,6 +177,10 @@ def interpolate2_randomGraphs(model, data,latents,n_split, decode_times):
     z2 = z2 * z_std + z_mean
     z_diff = (z1-z2)/n_split
     points = []
+    ncols = 3
+    nrows = math.ceil((n_split+1)/ncols)
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    axs = axs.flatten()
     for i in range(n_split+1):
         offset = z_diff*i
         c_z = offset+z2
@@ -175,8 +190,8 @@ def interpolate2_randomGraphs(model, data,latents,n_split, decode_times):
         g, _ = decode_from_latent_space(c_z,model,decode_times,'variable',True, 'BN')
         g_x = g[0].to_networkx()
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos)
-        plt.show()
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i])
+    plt.show()
     points = np.array(points)
     print(np.shape(points))
     points = points.reshape((n_split+1,model.nz))
@@ -184,22 +199,24 @@ def interpolate2_randomGraphs(model, data,latents,n_split, decode_times):
     components = pca.fit_transform(points)
     plt.scatter(components[:,0], components[:,1])
     plt.scatter(points[:,0], points[:,1])
-    for point in points:
-        print(point)
-    for component in components:
-        print(component)
+    # for point in points:
+    #     print(point)
+    # for component in components:
+    #     print(component)
     return components
 
 
 def interpolate3_Circle(model,data, interpolate_number,decode_times):
     print('Interpolation experiments around a great circle')
+    print("xd")
+    importlib.reload(util)
     # interpolation_res_dir = res_dir
     # if not os.path.exists(interpolation_res_dir):
     #     os.makedirs(interpolation_res_dir) 
     model.eval()
     g_ix = random.randint(0,len(data)-1)
-    print(len(data))
-    print(g_ix)
+    # print(len(data))
+    # print(g_ix)
     g0 =  data[g_ix]
     z0, _ = model.encode(g0)
     norm0 = torch.norm(z0)
@@ -207,27 +224,38 @@ def interpolate3_Circle(model,data, interpolate_number,decode_times):
     # there are infinite possible directions that are orthogonal to z0,
     # we just randomly pick one from a finite set
     dim_to_change = random.randint(0, z0.shape[1]-1)  # this to get different great circles
-    print(dim_to_change)
+    # print(dim_to_change)
     z1[0, dim_to_change] = -(z0[0, :].sum() - z0[0, dim_to_change]) / z0[0, dim_to_change]
     z1 = z1 / torch.norm(z1) * norm0
-    print('z0: ', z0, 'z1: ', z1, 'dot product: ', (z0 * z1).sum().item())
-    print('norm of z0: {}, norm of z1: {}'.format(norm0, torch.norm(z1)))
-    print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
+    # print('z0: ', z0, 'z1: ', z1, 'dot product: ', (z0 * z1).sum().item())
+    # print('norm of z0: {}, norm of z1: {}'.format(norm0, torch.norm(z1)))
+    # print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
     omega = torch.acos(torch.dot(z0.flatten(), z1.flatten()))
-    print('angle between z0 and z1: {}'.format(omega))
+    # print('angle between z0 and z1: {}'.format(omega))
     Z = []  # to store all the interpolation points
+    ncols = 3
+    nrows = math.ceil((interpolate_number+1)/ncols)
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    axs = axs.flatten()
     for j in range(0, interpolate_number + 1):
         theta = 2*math.pi / interpolate_number * j
         zj = z0 * np.cos(theta) + z1 * np.sin(theta)
-        Z.append(zj)
-    Z = torch.cat(Z, 0)
-    # decode many times and select the most common one
-    G, _ = decode_from_latent_space(latent_points=Z,model= model,decode_attempts=decode_times, return_igraph=True, data_type='BN') 
-    for j in range(0, interpolate_number + 1):
-        g_x = G[j].to_networkx()
+        print(zj)
+    #     Z.append(zj)
+        g, _ = decode_from_latent_space(zj,model,decode_times,'variable',True, 'BN')
+        print(g)
+        g_x = g[0].to_networkx()
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos)
-        plt.show()
+        nx.draw_networkx(g_x, pos=pos, ax=axs[j])
+    # Z = torch.cat(Z, 0)
+    # decode many times and select the most common one
+    # G, _ = decode_from_latent_space(latent_points=Z,model= model,decode_attempts=decode_times, return_igraph=True, data_type='BN') 
+    # for j in range(0, interpolate_number + 1):
+    #     print(G[j])
+    #     g_x = G[j].to_networkx()
+    #     pos = nx.circular_layout(g_x)
+    #     nx.draw_networkx(g_x, pos=pos, ax=axs[j])
+    plt.show()
 
 
 
@@ -280,3 +308,9 @@ def DAG_hash(graph) -> int:
         # n2 =  "".join([str(nodeType) for nodeType in nodeTypes + [0]] + [str(neighbour)  for nodeType in nodeTypes for neighbour in sorted([g.vs[nodeIndex]["type"] for nodeIndex in g.neighbors(g.vs.find(type = nodeType), 'in')])+[0]])
         n2 =  "".join([str(nodeType) for nodeType in nodeTypes + [0]] + [str(neighbour)  for nodeType in nodeTypes for neighbour in sorted([g.vs[nodeIndex]["type"] for nodeIndex in g.neighbors(g.vs.find(type = nodeType), 'in')])+[0]])
         return int(n2)
+
+
+def clear_graphs(graphs):
+    for g in graphs:
+        to_delete_ids = [v.index for v in g.vs if v["type"] == 0 or v["type"] == 1]
+        g.delete_vertices(to_delete_ids)

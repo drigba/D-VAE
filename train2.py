@@ -55,27 +55,29 @@ parser.add_argument('--only-test', action='store_true', default=False,
 parser.add_argument('--small-train', action='store_true', default=False,
                     help='if True, use a smaller version of train set')
 # model settings
-parser.add_argument('--model', default='DVAE_NOBATCHNORM_ROW', help='model to use: DVAE, DVAE_NOBATCHNORM, DVAE_NOBATCHNORM_ROW')
+parser.add_argument('--model', default='DVAE_NOBATCHNORM', help='model to use: DVAE, DVAE_NOBATCHNORM, DVAE_NOBATCHNORM_ROW')
 
-parser.add_argument('--hs', type=int, default=128, metavar='N',
+parser.add_argument('--hs', type=int, default=256, metavar='N',
                     help='hidden size of GRUs')
-parser.add_argument('--nz', type=int, default=7, metavar='N',
+parser.add_argument('--nz', type=int, default=14, metavar='N',
                     help='number of dimensions of latent vectors z')
 parser.add_argument('--beta', type=int, default=0.1, metavar='S',
                     help='KL divergence weight in loss (default:0.01)')
 parser.add_argument('--save-start', type=int, default=0, metavar='N',
                     help='how many epochs to wait to start saving model states')   
-parser.add_argument('--early-stop-patience', type=int, default=50, metavar='S',
+parser.add_argument('--early-stop-patience', type=int, default=200, metavar='S',
                     help='Patience before early stopping (default:10)')
+parser.add_argument('--fix-save-interval', type=int, default=5, metavar='S',
+                    help='In case of loss increase still save with fix intervals (default:None)')
 
 
 
 # optimization settings
-parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
+parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
                     help='learning rate (default: 1e-4)')
 parser.add_argument('--epochs', type=int, default=3000, metavar='N',
                     help='number of epochs to train')
-parser.add_argument('--batch-size', type=int, default=64, metavar='N',
+parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='batch size during training')
 
 
@@ -114,7 +116,7 @@ print(args)
 counter = 1
 
 args.file_dir = os.path.dirname(os.path.realpath('__file__'))
-args.res_dir = os.path.join(args.file_dir, 'vertex_{}_{}dim_latent_KL{}_{}_hs{}_batchsize{}/{}{}_{}'.format(args.nvt-2,args.nz,args.beta,args.model,args.hs,args.batch_size,args.data_name, 
+args.res_dir = os.path.join(args.file_dir, 'vertex_{}_{}dim_latent_KL{}_{}_hs{}_batchsize{}_lr{}/{}{}_{}'.format(args.nvt-2,args.nz,args.beta,args.model,args.hs,args.batch_size,args.lr,args.data_name, 
                                                                  args.save_appendix, counter))
 
 
@@ -124,7 +126,7 @@ while(os.path.exists(args.res_dir)):
     args.res_dir = args.res_dir[:-1]
     args.res_dir = args.res_dir + str(counter)
 
-
+print(args.res_dir)
 args.scheduler_dir = os.path.join(args.res_dir, "scheduler")
 args.optimizer_dir = os.path.join(args.res_dir, "optimizer")
 args.model_dir = os.path.join(args.res_dir, "model")
@@ -442,6 +444,26 @@ def save_latent_representations(epoch):
                          'Y_test': Y_test
                          }
                      )
+    
+
+
+
+
+
+def save_things(epoch):
+    model_name = os.path.join(args.model_dir, 'model_checkpoint{}.pth'.format(epoch))
+    optimizer_name = os.path.join(args.optimizer_dir, 'optimizer_checkpoint{}.pth'.format(epoch))
+    scheduler_name = os.path.join(args.scheduler_dir, 'scheduler_checkpoint{}.pth'.format(epoch))
+    torch.save(model.state_dict(), model_name)
+    torch.save(optimizer.state_dict(), optimizer_name)
+    torch.save(scheduler.state_dict(), scheduler_name)
+    # print("visualize reconstruction examples...")
+    visualize_recon(epoch)
+    print("extract latent representations...")
+    save_latent_representations(epoch)
+    print("sample from prior...")
+
+
 '''Training begins here'''
 random.seed = 10
 all_data = []
@@ -502,7 +524,6 @@ test_data = all_data[(num_of_train+num_of_test):]
 print(len(train_data))
 print(len(valid_data))
 print(len(test_data))
-
 
 
 
@@ -581,32 +602,16 @@ for epoch in range(start_epoch + 1, args.epochs + 1):
         # best_scheduler = scheduler.state_dict()
         best_epoch = epoch
         if epoch >=args.save_start:
-            model_name = os.path.join(args.model_dir, 'model_checkpoint{}.pth'.format(epoch))
-            optimizer_name = os.path.join(args.optimizer_dir, 'optimizer_checkpoint{}.pth'.format(epoch))
-            scheduler_name = os.path.join(args.scheduler_dir, 'scheduler_checkpoint{}.pth'.format(epoch))
-            torch.save(model.state_dict(), model_name)
-            torch.save(optimizer.state_dict(), optimizer_name)
-            torch.save(scheduler.state_dict(), scheduler_name)
-            # print("visualize reconstruction examples...")
-            visualize_recon(epoch)
-            print("extract latent representations...")
-            save_latent_representations(epoch)
-            print("sample from prior...")
+            save_things(epoch)
     else:
         patience_counter += 1
+        if epoch % args.fix_save_interval == 0:
+            save_things(epoch)
         print("Validation loss increased {} -> {}. Patience counter at: {}/{}".format(early_stop_loss,validation_recon, patience_counter, args.early_stop_patience))
     
     if patience_counter >= args.early_stop_patience:
         print("Early stopping at epoch: {}. Best results at epoch: {}".format(epoch, best_epoch))
-        # model_name = os.path.join(args.res_dir, 'early_stopped_model_checkpoint{}.pth'.format(best_epoch))
-        # optimizer_name = os.path.join(args.res_dir, 'early_stopped_optimizer_checkpoint{}.pth'.format(best_epoch))
-        # scheduler_name = os.path.join(args.res_dir, 'early_stopped_scheduler_checkpoint{}.pth'.format(best_epoch))
-        # torch.save(best_model, model_name)
-        # torch.save(best_optimizer, optimizer_name)
-        # torch.save(best_scheduler, scheduler_name)
         break
-# interpolation_exp2(epoch)
-# smoothness_exp(epoch)
-# interpolation_exp3(epoch)
+
 
 pdb.set_trace()

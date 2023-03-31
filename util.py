@@ -323,19 +323,12 @@ def decode_from_latent_space(
         valid_arcs.append([])
         for j in range(decode_attempts):
             arc = decoded_arcs[j][i]  # arc is an igraph
-            if data_type == 'ENAS':
-                if is_valid_ENAS(arc, model.START_TYPE, model.END_TYPE):
-                    if not check_n_nodes or check_n_nodes and arc.vcount() == n_nodes:
-                        cur = decode_igraph_to_ENAS(arc)  # a flat ENAS string
-                        if return_igraph:
-                            str2igraph[cur] = arc
-                        valid_arcs[i].append(cur)
-            elif data_type == 'BN':  
-                if is_valid_BN(arc, model.START_TYPE, model.END_TYPE, nvt=model.nvt):
-                    cur = decode_igraph_to_BN_adj(arc)  # a flat BN adjacency matrix string
-                    if return_igraph:
-                        str2igraph[cur] = arc
-                    valid_arcs[i].append(cur)
+
+
+            cur = decode_igraph_to_BN_adj(arc)  # a flat BN adjacency matrix string
+            if return_igraph:
+                str2igraph[cur] = arc
+            valid_arcs[i].append(cur)
         pbar.set_description("Check validity for {}/{}".format(i, latent_points.shape[0]))
 
     # select the most common decoding as the final architecture
