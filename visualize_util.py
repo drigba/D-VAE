@@ -220,7 +220,6 @@ def interpolate2_randomGraphs(model, data,latents,n_split, decode_times, stochas
 
 def interpolate3_Circle(model,data, interpolate_number,decode_times):
     print('Interpolation experiments around a great circle')
-    print("xd")
     importlib.reload(util)
     # interpolation_res_dir = res_dir
     # if not os.path.exists(interpolation_res_dir):
@@ -248,6 +247,57 @@ def interpolate3_Circle(model,data, interpolate_number,decode_times):
     ncols = 3
     nrows = math.ceil((interpolate_number+1)/ncols)
     fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    axs = axs.flatten()
+    for j in range(0, interpolate_number + 1):
+        theta = 2*math.pi / interpolate_number * j
+        zj = z0 * np.cos(theta) + z1 * np.sin(theta)
+        print(zj)
+    #     Z.append(zj)
+        g, _ = decode_from_latent_space(zj,model,decode_times,'variable',True, 'BN')
+        print(g)
+        g_x = g[0].to_networkx()
+        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
+        pos = nx.circular_layout(g_x)
+        nx.draw_networkx(g_x, pos=pos, ax=axs[j], labels = labels)
+    # Z = torch.cat(Z, 0)
+    # decode many times and select the most common one
+    # G, _ = decode_from_latent_space(latent_points=Z,model= model,decode_attempts=decode_times, return_igraph=True, data_type='BN') 
+    # for j in range(0, interpolate_number + 1):
+    #     print(G[j])
+    #     g_x = G[j].to_networkx()
+    #     pos = nx.circular_layout(g_x)
+    #     nx.draw_networkx(g_x, pos=pos, ax=axs[j])
+    plt.show()
+
+
+def interpolate3_Circle_Row(model,data, interpolate_number,decode_times):
+    print('Interpolation experiments around a great circle')
+    importlib.reload(util)
+    # interpolation_res_dir = res_dir
+    # if not os.path.exists(interpolation_res_dir):
+    #     os.makedirs(interpolation_res_dir) 
+    model.eval()
+    g_ix = random.randint(0,len(data)-1)
+    # print(len(data))
+    # print(g_ix)
+    g0 =  data[g_ix]
+    z0, _ = model.encode(g0)
+    norm0 = torch.norm(z0)
+    z1 = torch.ones_like(z0)
+    # there are infinite possible directions that are orthogonal to z0,
+    # we just randomly pick one from a finite set
+    dim_to_change = random.randint(0, z0.shape[1]-1)  # this to get different great circles
+    # print(dim_to_change)
+    z1[0, dim_to_change] = -(z0[0, :].sum() - z0[0, dim_to_change]) / z0[0, dim_to_change]
+    z1 = z1 / torch.norm(z1) * norm0
+    # print('z0: ', z0, 'z1: ', z1, 'dot product: ', (z0 * z1).sum().item())
+    # print('norm of z0: {}, norm of z1: {}'.format(norm0, torch.norm(z1)))
+    # print('distance between z0 and z1: {}'.format(torch.norm(z0-z1)))
+    omega = torch.acos(torch.dot(z0.flatten(), z1.flatten()))
+    # print('angle between z0 and z1: {}'.format(omega))
+    Z = []  # to store all the interpolation points
+    ncols = (interpolate_number+1)
+    fig, axs = plt.subplots(1, ncols, figsize=(40, 5))
     axs = axs.flatten()
     for j in range(0, interpolate_number + 1):
         theta = 2*math.pi / interpolate_number * j
