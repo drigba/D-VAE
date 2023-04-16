@@ -34,9 +34,9 @@ parser = argparse.ArgumentParser(description='Train Variational Autoencoders for
 parser.add_argument('--data-type', default='BN',
                     help='ENAS: ENAS-format CNN structures; BN: Bayesian networks')
 parser.add_argument('--data-name', default='final_structures6', help='graph dataset name')
-parser.add_argument('--nvt', type=int, default=7, help='number of different node types, \
+parser.add_argument('--nvt', type=int, default=6, help='number of different node types, \
                     6 for final_structures6, 8 for asia_200k')
-parser.add_argument('--max-n', type=int, default=7, help='number of vertices in the graphs')
+parser.add_argument('--max-n', type=int, default=6, help='number of vertices in the graphs')
 parser.add_argument('--save-appendix', default='', 
                     help='what to append to data-name as save-name for results')
 parser.add_argument('--save-interval', type=int, default=1, metavar='N',
@@ -63,7 +63,7 @@ parser.add_argument('--nz', type=int, default=14, metavar='N',
                     help='number of dimensions of latent vectors z')
 parser.add_argument('--beta', type=int, default=0.1, metavar='S',
                     help='KL divergence weight in loss (default:0.01)')
-parser.add_argument('--save-start', type=int, default=0, metavar='N',
+parser.add_argument('--save-start', type=int, default=20, metavar='N',
                     help='how many epochs to wait to start saving model states')   
 parser.add_argument('--early-stop-patience', type=int, default=200, metavar='S',
                     help='Patience before early stopping (default:10)')
@@ -222,22 +222,21 @@ else:
                                                   'scheduler_checkpoint{}.pth'.format(epoch)))
 
 # plot sample train/test graphs
-def validate(epoch):
+def validate(epoch, data):
     model.eval()
-    shuffle(valid_data)
-    pbar = tqdm(valid_data)
+    shuffle(data)
+    pbar = tqdm(data)
     validation_loss = 0
     recon_loss = 0
     kld_loss = 0
     g_batch = []
     for i, g in enumerate(pbar):
         g_batch.append(g)
-        if len(g_batch) == args.batch_size or i == len(train_data) - 1:
+        if len(g_batch) == args.batch_size or i == len(data) - 1:
             with torch.no_grad():
                 g_batch = model._collate_fn(g_batch)
                 mu, logvar = model.encode(g_batch)
                 loss, recon, kld = model.loss(mu, logvar, g_batch)
-                
                 pbar.set_description('Validation, Epoch: %d, loss: %0.4f, recon: %0.4f, kld: %0.4f' % (
                                     epoch, loss.item()/len(g_batch), recon.item()/len(g_batch), 
                                     kld.item()/len(g_batch)))
@@ -248,7 +247,7 @@ def validate(epoch):
                 g_batch = []
 
     print('====> Epoch: {} Average validation loss: {:.4f}'.format(
-          epoch, validation_loss / len(valid_data)))
+          epoch, validation_loss / len(data)))
     return validation_loss, recon_loss, kld_loss
 
 '''Define some train/test functions'''
@@ -477,7 +476,7 @@ print("Loading train Data")
 # Meaning that vertex with index 0 will be processed first
 # Therefore the newly added starting node has to have index:0 otherwise an exception is thrown
 i = 0
-graph_data_file_path = os.path.join("..", "graph_data", "vertex_5")
+graph_data_file_path = os.path.join("..", "graph_data", "vertex_4", "vertex_4_new")
 for g_ix,filename in enumerate(tqdm(os.listdir(graph_data_file_path))):
     path = os.path.join(graph_data_file_path, filename)
     with open(path, 'rb') as pickle_file:
@@ -560,7 +559,7 @@ best_epoch = 0
 start_epoch = args.continue_from if args.continue_from is not None else 0
 for epoch in range(start_epoch + 1, args.epochs + 1):
     train_loss, train_recon_loss, train_kld_loss = train(epoch)
-    _, validation_recon, _ = validate(epoch)
+    _, validation_recon, _ = validate(epoch, test_data)
     Nll = test(False)
     with open(loss_name, 'a') as loss_file:
         loss_file.write("{:.2f} {:.2f} {:.2f} {:.2f} {:.2f}\n".format(
