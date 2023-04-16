@@ -297,7 +297,7 @@ def interpolate3_Circle_Row(model,data, interpolate_number,decode_times):
     # print('angle between z0 and z1: {}'.format(omega))
     Z = []  # to store all the interpolation points
     ncols = (interpolate_number+1)
-    fig, axs = plt.subplots(1, ncols, figsize=(40, 5))
+    fig, axs = plt.subplots(1, ncols, figsize=(45, 4))
     axs = axs.flatten()
     for j in range(0, interpolate_number + 1):
         theta = 2*math.pi / interpolate_number * j
