@@ -36,7 +36,15 @@ from scipy.stats import wasserstein_distance
 from wrapper import GraphWrapper
 import importlib
 
-
+color_dict = {
+        0 : "pink",
+        1 : "green",
+        2 : "blue",
+        3 : "yellow",
+        4 : "orange",
+        5 : "purple",
+        6 : "pink",
+    }
 
 def prior_validity(model, latents, data, batch_size, latent_points):
     Z_train = latents
@@ -88,6 +96,7 @@ def prior_validity(model, latents, data, batch_size, latent_points):
 
 
 def interpolate1_randomPoints( model, latents,n_split):
+    
     model.eval()
     z1 = torch.randn(1,model.nz).to(model.get_device())
     z2 = torch.randn(1,model.nz).to(model.get_device())
@@ -98,9 +107,9 @@ def interpolate1_randomPoints( model, latents,n_split):
     z2 = z2 * z_std + z_mean
     z_diff = (z1-z2)/n_split
     points = []
-    ncols = 3
-    nrows = math.ceil((n_split+1)/ncols)
-    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    ncols = n_split+1
+    nrows = 1
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (20,2))
     axs = axs.flatten()
     for i in range(n_split+1):
         offset = z_diff*i
@@ -108,11 +117,14 @@ def interpolate1_randomPoints( model, latents,n_split):
         print(c_z.size())
         points.append(c_z.cpu().detach().numpy())
         g = model.decode(c_z)
+        to_delete_ids = [v.index for v in g[0].vs if v["type"] == 0 or v["type"] == 1]
+        g[0].delete_vertices(to_delete_ids)
         g_x = g[0].to_networkx()
-        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
+        labels = {ix: t-2 for (ix, t) in enumerate(g[0].vs["type"])}
+        colors = [color_dict[t] for t in g[0].vs["type"]]
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[i], labels = labels)
-    plt.subplots_adjust(hspace=0.2, wspace=0.2)
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i], labels = labels, node_color= colors)
+    plt.subplots_adjust(hspace=0, wspace=0)
     plt.show()
     points = np.array(points)
     print(np.shape(points))
@@ -138,9 +150,9 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
     z2 = z2 * z_std + z_mean
     z_diff = (z1-z2)/n_split
     points = []
-    ncols = 3
-    nrows = math.ceil((n_split+1)/ncols)
-    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    ncols = n_split+1
+    nrows = 1
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (20,2))
     axs = axs.flatten()
     for i in range(n_split+1):
         offset = z_diff*i
@@ -149,10 +161,15 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
         points.append(c_z.cpu().detach().numpy())
         # g = model.decode(c_z)
         g, _ = decode_from_latent_space(c_z,model,decode_times,'variable',True, 'BN')
+        to_delete_ids = [v.index for v in g[0].vs if v["type"] == 0 or v["type"] == 1]
+        g[0].delete_vertices(to_delete_ids)
         g_x = g[0].to_networkx()
-        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
+        colors = [color_dict[t] for t in g[0].vs["type"]]
+        labels = {ix: t-2 for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[i], labels = labels)
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i], labels = labels, node_color = colors)
+    plt.subplots_adjust(hspace=0, wspace=0)
+
     plt.show()
     points = np.array(points)
     print(np.shape(points))
@@ -182,27 +199,42 @@ def interpolate2_randomGraphs(model, data,latents,n_split, decode_times, stochas
     z2 = z2 * z_std + z_mean
     z_diff = (z1-z2)/n_split
     points = []
-    ncols = 3
-    nrows = math.ceil((n_split+3)/ncols)
-    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    ncols = n_split+3
+    nrows = 1
+    fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (20,2))
     print("Hi")
     axs = axs.flatten()
-    g_x= g_s[0].to_networkx()
+    g_st = g_s[0].copy()
+    to_delete_ids = [v.index for v in g_st.vs if v["type"] == 0 or v["type"] == 1]
+    g_st.delete_vertices(to_delete_ids)
+    g_x= g_st.to_networkx()
     pos = nx.circular_layout(g_x)
-    nx.draw_networkx(g_x, pos=pos, ax=axs[0])
+    labels = {ix: t-2 for (ix, t) in enumerate(g_st.vs["type"])}
+    colors = [color_dict[t] for t in g_st.vs["type"]]
+    nx.draw_networkx(g_x, pos=pos, ax=axs[0], labels = labels, node_color = colors)
     for i in range(n_split+1):
         offset = z_diff*i
         c_z = offset+z2
         points.append(c_z.cpu().detach().numpy())
         # g = model.decode(c_z)
         g, _ = decode_from_latent_space(c_z,model,decode_times,'variable',True, 'BN')
+        to_delete_ids = [v.index for v in g[0].vs if v["type"] == 0 or v["type"] == 1]
+        g[0].delete_vertices(to_delete_ids)
         g_x = g[0].to_networkx()
-        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
+        labels = {ix: t-2 for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[i+1], labels = labels)
-    g_x= g_s[1].to_networkx()
+        colors = [color_dict[t] for t in g[0].vs["type"]]
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i+1], labels = labels, node_color = colors)
+    g_st = g_s[1].copy()
+    to_delete_ids = [v.index for v in g_st.vs if v["type"] == 0 or v["type"] == 1]
+    g_st.delete_vertices(to_delete_ids)
+    g_x= g_st.to_networkx()
     pos = nx.circular_layout(g_x)
-    nx.draw_networkx(g_x, pos=pos, ax=axs[-1])
+    labels = {ix: t-2 for (ix, t) in enumerate(g_st.vs["type"])}
+    colors = [color_dict[t] for t in g_st.vs["type"]]
+    nx.draw_networkx(g_x, pos=pos, ax=axs[-1], labels = labels, node_color = colors)
+    plt.subplots_adjust(hspace=0, wspace=0)
+
     plt.show()
     points = np.array(points)
     print(np.shape(points))
@@ -255,10 +287,13 @@ def interpolate3_Circle(model,data, interpolate_number,decode_times):
     #     Z.append(zj)
         g, _ = decode_from_latent_space(zj,model,decode_times,'variable',True, 'BN')
         print(g)
+        to_delete_ids = [v.index for v in g[0].vs if v["type"] == 0 or v["type"] == 1]
+        g[0].delete_vertices(to_delete_ids)
         g_x = g[0].to_networkx()
-        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
+        labels = {ix: t-2 for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[j], labels = labels)
+        colors = [color_dict[t] for t in g[0].vs["type"]]
+        nx.draw_networkx(g_x, pos=pos, ax=axs[j], labels = labels, node_color = colors)
     # Z = torch.cat(Z, 0)
     # decode many times and select the most common one
     # G, _ = decode_from_latent_space(latent_points=Z,model= model,decode_attempts=decode_times, return_igraph=True, data_type='BN') 
@@ -297,7 +332,7 @@ def interpolate3_Circle_Row(model,data, interpolate_number,decode_times):
     # print('angle between z0 and z1: {}'.format(omega))
     Z = []  # to store all the interpolation points
     ncols = (interpolate_number+1)
-    fig, axs = plt.subplots(1, ncols, figsize=(45, 4))
+    fig, axs = plt.subplots(1, ncols, figsize=(20, 2))
     axs = axs.flatten()
     for j in range(0, interpolate_number + 1):
         theta = 2*math.pi / interpolate_number * j
@@ -306,10 +341,13 @@ def interpolate3_Circle_Row(model,data, interpolate_number,decode_times):
     #     Z.append(zj)
         g, _ = decode_from_latent_space(zj,model,decode_times,'variable',True, 'BN')
         print(g)
+        to_delete_ids = [v.index for v in g[0].vs if v["type"] == 0 or v["type"] == 1]
+        g[0].delete_vertices(to_delete_ids)
         g_x = g[0].to_networkx()
-        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
+        labels = {ix: t-2 for (ix, t) in enumerate(g[0].vs["type"])}
+        colors = [color_dict[t] for t in g[0].vs["type"]]
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[j], labels = labels)
+        nx.draw_networkx(g_x, pos=pos, ax=axs[j], labels = labels, node_color = colors)
     # Z = torch.cat(Z, 0)
     # decode many times and select the most common one
     # G, _ = decode_from_latent_space(latent_points=Z,model= model,decode_attempts=decode_times, return_igraph=True, data_type='BN') 
@@ -318,6 +356,7 @@ def interpolate3_Circle_Row(model,data, interpolate_number,decode_times):
     #     g_x = G[j].to_networkx()
     #     pos = nx.circular_layout(g_x)
     #     nx.draw_networkx(g_x, pos=pos, ax=axs[j])
+    plt.subplots_adjust(hspace=0, wspace=0)
     plt.show()
 
 
