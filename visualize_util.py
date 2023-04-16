@@ -109,8 +109,9 @@ def interpolate1_randomPoints( model, latents,n_split):
         points.append(c_z.cpu().detach().numpy())
         g = model.decode(c_z)
         g_x = g[0].to_networkx()
+        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax = axs[i])
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i], labels = labels)
     plt.subplots_adjust(hspace=0.2, wspace=0.2)
     plt.show()
     points = np.array(points)
@@ -149,8 +150,9 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
         # g = model.decode(c_z)
         g, _ = decode_from_latent_space(c_z,model,decode_times,'variable',True, 'BN')
         g_x = g[0].to_networkx()
+        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[i])
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i], labels = labels)
     plt.show()
     points = np.array(points)
     print(np.shape(points))
@@ -165,11 +167,14 @@ def interpolate1_RandomPoints_B( model, latents,n_split,decode_times):
     #     print(component)
     return components
 
-def interpolate2_randomGraphs(model, data,latents,n_split, decode_times):
+def interpolate2_randomGraphs(model, data,latents,n_split, decode_times, stochastic = True):
     model.eval()
     g_s = random.sample(data,2)
+    if not stochastic:
+        g_s = [data[10], data[-1]]
     z1 = model.encode(g_s[0])[0]
     z2 = model.encode(g_s[1])[0]
+    
     Z_train = latents
     z_mean, z_std = np.array(Z_train.mean(0)) ,np.array(Z_train.std(0)) 
     z_mean, z_std = torch.FloatTensor(z_mean).to(model.get_device()), torch.FloatTensor(z_std).to(model.get_device())
@@ -178,19 +183,26 @@ def interpolate2_randomGraphs(model, data,latents,n_split, decode_times):
     z_diff = (z1-z2)/n_split
     points = []
     ncols = 3
-    nrows = math.ceil((n_split+1)/ncols)
+    nrows = math.ceil((n_split+3)/ncols)
     fig,axs = plt.subplots(nrows= nrows, ncols=ncols, figsize = (13,13))
+    print("Hi")
     axs = axs.flatten()
+    g_x= g_s[0].to_networkx()
+    pos = nx.circular_layout(g_x)
+    nx.draw_networkx(g_x, pos=pos, ax=axs[0])
     for i in range(n_split+1):
         offset = z_diff*i
         c_z = offset+z2
-        print(c_z.size())
         points.append(c_z.cpu().detach().numpy())
         # g = model.decode(c_z)
         g, _ = decode_from_latent_space(c_z,model,decode_times,'variable',True, 'BN')
         g_x = g[0].to_networkx()
+        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[i])
+        nx.draw_networkx(g_x, pos=pos, ax=axs[i+1], labels = labels)
+    g_x= g_s[1].to_networkx()
+    pos = nx.circular_layout(g_x)
+    nx.draw_networkx(g_x, pos=pos, ax=axs[-1])
     plt.show()
     points = np.array(points)
     print(np.shape(points))
@@ -245,8 +257,9 @@ def interpolate3_Circle(model,data, interpolate_number,decode_times):
         g, _ = decode_from_latent_space(zj,model,decode_times,'variable',True, 'BN')
         print(g)
         g_x = g[0].to_networkx()
+        labels = {ix: t for (ix, t) in enumerate(g[0].vs["type"])}
         pos = nx.circular_layout(g_x)
-        nx.draw_networkx(g_x, pos=pos, ax=axs[j])
+        nx.draw_networkx(g_x, pos=pos, ax=axs[j], labels = labels)
     # Z = torch.cat(Z, 0)
     # decode many times and select the most common one
     # G, _ = decode_from_latent_space(latent_points=Z,model= model,decode_attempts=decode_times, return_igraph=True, data_type='BN') 

@@ -361,8 +361,12 @@ class DVAE(nn.Module):
             res = res + ell
 
         res = -res  # convert likelihood to loss
-        kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        kld = self.kld(logvar,mu)
         return res + self.beta*kld, res, kld
+
+    def kld(self, logvar, mu):
+         kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+         return kld
 
     def encode_decode(self, G):
         mu, logvar = self.encode(G)
@@ -393,6 +397,13 @@ class DVAE_NOBATCHNORM(DVAE):
                 nn.ReLU(),
                 nn.Linear(hs * 2, nvt)
                 )  # which type of new vertex to add f(h0, hg)
+        
+class DVAE_NOBATCHNORM_UNIFORM_PRIOR(DVAE_NOBATCHNORM):
+    def __init__(self, max_n, nvt, START_TYPE, END_TYPE, hs=501, nz=56, bidirectional=False, beta =0.01):
+        super(DVAE_NOBATCHNORM_UNIFORM_PRIOR, self).__init__(max_n, nvt, START_TYPE, END_TYPE, hs, nz, bidirectional, beta)
+    def kld(self, logvar, mu):
+         kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+         return kld
 
 
 class DVAE_NOBATCHNORM_ROW(DVAE_NOBATCHNORM):
